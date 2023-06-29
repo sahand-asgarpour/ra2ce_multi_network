@@ -7,14 +7,14 @@ dependencies:
   - pip
   - gdal=3.5.1
   - fiona
-  - geojson
-  - numpy
-  - pandas
-  - networkx
-  - scipy
-  - osmnx
-  - geopandas
-  - Shapely
+  # - geojson
+  # - numpy
+  # - pandas
+  # - networkx
+  # - scipy
+  # - osmnx
+  # - geopandas
+  # - Shapely
   # - affine
   # - click
   # - geopy
