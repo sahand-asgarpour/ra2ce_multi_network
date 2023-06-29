@@ -15,3 +15,13 @@ If only interested in using the tool via command-line interface follow these ste
 ::
   pip install git+https://github.com/sahand-asgarpour/ra2ce_multi_network.git
 ::
+
+Development mode
++++++++++++++++++++++++++++
+When running a development environment with Anaconda, the user may follow these steps in command line:
+::
+  cd <to the main repository RA2CE folder>
+  conda env create -f .config\environment.yml
+  conda activate ra2ce_env
+  poetry install
+::
