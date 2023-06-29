@@ -22,6 +22,6 @@ When running a development environment with Anaconda, the user may follow these 
 ::
   cd <to the main repository ra2ce_multi_network folder>
   conda env create -f .config\environment.yml
-  conda activate ra2ce_env
+  conda activate ra2ce_multi_network_env
   poetry install
 ::
