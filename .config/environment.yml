@@ -11,14 +11,26 @@ dependencies:
   - conda-forge::numpy
   - conda-forge::scipy
   - conda-forge::Shapely
-  # - conda-forge::fiona
+  - conda-forge::fiona
+  - conda-forge::jupyter
+  - conda-forge::pygeos
+  - conda-forge::rasterio
+  - conda-forge::matplotlib
+  - conda-forge::contextily
+  - conda-forge::rasterstats
+  - conda-forge::seaborn
+  - conda-forge::jupyterlab
+  - conda-forge::python-igraph
+  - conda-forge::rtree 
+  - cmake
+  # - osmconvert: Manually download binaries from https://wiki.openstreetmap.org/wiki/Osmconvert#Windows => rename to osmconvert.exe => place the .exe in the osm folder created by osm_flex
+  # - trail: Manually place the src folder in the ra2ce_multi|_network folder, and then import accordingly in .py files
   - pip:
     - geojson
     - osmnx
+    - damagescanner
+    - snkit
     - osm-flex
-    # Manual install of osm-flex if gave error:
-    ## activate ra2ce_multi_network_env
-    ## pip install osm-flex 
     
     # trails
     
