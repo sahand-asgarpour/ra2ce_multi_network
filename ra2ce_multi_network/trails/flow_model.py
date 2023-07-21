@@ -1,5 +1,6 @@
 import os,sys
 
+from IPython import display
 from osgeo import gdal
 import numpy as np
 import pandas as pd
@@ -468,7 +469,7 @@ def run_flow_analysis(country,transport_network,gdf_admin,OD_dict,notebook=False
 
         # when running the code in a notebook, the figure updates instead of a new figure each iteration
         if notebook:
-            pl.plot(save_fits) 
+            pl.plot(save_fits)
             display.display(pl.gcf())
             display.clear_output(wait=True) 
         else:

@@ -22,11 +22,14 @@ dependencies:
   - conda-forge::jupyterlab
   - conda-forge::python-igraph
   - conda-forge::rtree 
+  - conda-forge::shapely
   - cmake
   # - osmconvert: Manually download binaries from https://wiki.openstreetmap.org/wiki/Osmconvert#Windows => rename to osmconvert.exe => place the .exe in the osm folder created by osm_flex
   # - trail: Manually place the src folder in the ra2ce_multi|_network folder, and then import accordingly in .py files
   - pip:
     - geojson
+    - igraph
+    - pygeos
     - osmnx
     - damagescanner
     - snkit
