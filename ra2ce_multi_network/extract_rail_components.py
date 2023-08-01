@@ -81,9 +81,8 @@ station_gdf = filter_on_other_tags(
 # rail_gdf = all_rail[all_rail['railway'] == 'rail']
 
 ## Find possible terminals
-# rail_network = detect_possible_terminals(network_gdf=rail_track_gdf)
+rail_network = detect_possible_terminals(network_gdf=rail_track_gdf)
 a = 1
 
-# ToDO: See why some links miss in the rail_track extraction.
-# ToDO: Use osmnx and add polygone to extract network which is complete.
 # ToDo: Aggregate terminals at a given aggregation level
+# ToDo: create a connected network from the included nodes and graphs
