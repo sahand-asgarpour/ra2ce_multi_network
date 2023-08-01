@@ -81,8 +81,7 @@ station_gdf = filter_on_other_tags(
 # rail_gdf = all_rail[all_rail['railway'] == 'rail']
 
 ## Find possible terminals
-rail_network = detect_possible_terminals(network_gdf=rail_track_gdf)
+rail_network = detect_possible_terminals(network_gdf=rail_track_gdf, aggregation_range=0.0001)
 a = 1
 
-# ToDo: Aggregate terminals at a given aggregation level
 # ToDo: create a connected network from the included nodes and graphs

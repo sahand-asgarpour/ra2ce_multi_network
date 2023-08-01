@@ -8,7 +8,7 @@ from snkit.network import *
 from trails import *
 
 
-def detect_possible_terminals(network_gdf: gpd.GeoDataFrame) -> snkit.network.Network:
+def detect_possible_terminals(network_gdf: gpd.GeoDataFrame, aggregation_range: float) -> snkit.network.Network:
     ## Inspired by drop_hanging_nodes in trails/simplify.py
     network = make_network_from_gdf(network_gdf=network_gdf)
     # hanging_nodes : An array of the indices of nodes with degree 1
@@ -19,16 +19,16 @@ def detect_possible_terminals(network_gdf: gpd.GeoDataFrame) -> snkit.network.Ne
         lambda x: check_terminal_criteria(x['from_id'], x['to_id'], x['service'], hanging_nodes), axis=1
     ).dropna().tolist()
     network.nodes['possible_terminals'] = network.nodes['id'].apply(lambda x: 1 if x in possible_terminals else 0)
-    # Merge possible_terminals based on a range
-    network.nodes = merge_terminal_nodes(network, range=0.0001)
+    # Merge possible_terminals based on a aggregation_range
+    network.nodes = aggregate_terminal_nodes(network, aggregation_range=aggregation_range)
     return network
 
 
-def merge_terminal_nodes(network: snkit.network.Network, range: float) -> snkit.network.Network:
+def aggregate_terminal_nodes(network: snkit.network.Network, aggregation_range: float) -> snkit.network.Network:
     # The following 2 functions are used in the body of merge_terminal_nodes function.
     # merge_terminal_nodes starts after the following 2 functions.
-    def update_node_gdf(node_gdf: gpd.GeoDataFrame, terminal_collection: gpd.GeoDataFrame,
-                        considered_node_ids: list):
+    def update_node_gdf(node_gdf: gpd.GeoDataFrame, terminal_collection: gpd.GeoDataFrame, considered_node_ids: list)\
+            -> gpd.GeoDataFrame:
         terminal_collection_ids = terminal_collection['id'].to_numpy().tolist()
         if len(terminal_collection_ids) == 1:
             return node_gdf
@@ -60,7 +60,7 @@ def merge_terminal_nodes(network: snkit.network.Network, range: float) -> snkit.
                                           node_gdf['id'] == _id, 'terminal_collection'
                                       ].values[0]}
                                  ],
-                                 'buffer': _aggregated_terminal.buffer(range)},
+                                 'buffer': _aggregated_terminal.buffer(aggregation_range)},
                                 crs=node_gdf.crs)
 
     # merge_terminal_nodes function starts here
@@ -69,11 +69,11 @@ def merge_terminal_nodes(network: snkit.network.Network, range: float) -> snkit.
     node_gdf['terminal_collection'] = node_gdf.apply(
         lambda row: {row['id']} if row['possible_terminals'] == 1 else None, axis=1)
     node_gdf['buffer'] = node_gdf.apply(
-        lambda row: row.geometry.buffer(range) if row['possible_terminals'] == 1 else None, axis=1)
+        lambda row: row.geometry.buffer(aggregation_range) if row['possible_terminals'] == 1 else None, axis=1)
     new_id = node_gdf['id'].max() + 1
 
     for _, node in node_gdf[node_gdf["possible_terminals"] == 1].iterrows():
-        # Get possible_terminal nodes fall within the range of each possible_terminal
+        # Get possible_terminal nodes fall within the aggregation_range of each possible_terminal
         if node['id'] in considered_node_ids:
             continue
         terminal_collection = node_gdf[node_gdf["possible_terminals"] == 1][
@@ -87,7 +87,7 @@ def merge_terminal_nodes(network: snkit.network.Network, range: float) -> snkit.
     return node_gdf
 
 
-def make_network_from_gdf(network_gdf) -> snkit.network.Network:
+def make_network_from_gdf(network_gdf: gpd.GeoDataFrame) -> snkit.network.Network:
     net = Network(edges=network_gdf)
     net = add_endpoints(network=net)
     # In _split_edges_at_nodes if turn the Index=True then we get attribute names instead of _12, for instance
@@ -102,7 +102,7 @@ def make_network_from_gdf(network_gdf) -> snkit.network.Network:
     return net
 
 
-def find_hanging_nodes(network) -> np.ndarray:
+def find_hanging_nodes(network: snkit.network.Network) -> np.ndarray:
     if 'degree' not in network.nodes.columns:
         deg = calculate_degree(network)
     else:
@@ -110,7 +110,7 @@ def find_hanging_nodes(network) -> np.ndarray:
     return np.where(deg == 1)[0]
 
 
-def calculate_degree(network):
+def calculate_degree(network: snkit.network.Network) -> np.ndarray:
     """ based on trails.simplify
     """
     # the number of nodes(from index) to use as the number of bins
@@ -120,7 +120,7 @@ def calculate_degree(network):
     return np.bincount(network.edges['from_id'], None, ndC) + np.bincount(network.edges['to_id'], None, ndC)
 
 
-def check_terminal_criteria(from_node_id, to_node_id, edge_property, hanging_nodes):
+def check_terminal_criteria(from_node_id: int, to_node_id: int, edge_property: str, hanging_nodes: np.ndarray) -> int:
     if from_node_id in hanging_nodes and edge_property == 'spur':
         return from_node_id
     elif to_node_id in hanging_nodes and edge_property == 'spur':
