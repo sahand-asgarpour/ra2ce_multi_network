@@ -7,6 +7,8 @@ def filter_on_other_tags(attributes: dict, other_tags_keys: list, gdf: gpd.GeoDa
     if not isinstance(dropna, list):
         raise ValueError("""drop na should be the list of column names for which each row should be dropped 
         when the column's value is null""")
+    if gdf.empty:
+        return gdf
     if 'other_tags' in attributes:
         for flt in other_tags_keys:
             flt_attribute_name = flt.split('=>')[0]

@@ -18,7 +18,7 @@ dump_folder = Path(
 # dump-related
 country_iso3 = "NLD"
 country = DICT_GEOFABRIK[country_iso3][1]
-study_area_suffix = '_ROTTERDAM_PORT'
+study_area_suffix = '_test'
 
 # Clipping-related
 clip_polygon_path = Path(
@@ -67,13 +67,13 @@ raw_rail_track_gdf = extract(osm_path=study_area_dump_path, geo_type='lines',
 rail_track_gdf = filter_on_other_tags(
     attributes=rail_track_attributes, other_tags_keys=rail_track_attributes['other_tags'], gdf=raw_rail_track_gdf)
 
-raw_station_gdf = extract(osm_path=study_area_dump_path, geo_type='points',
-                          osm_keys=station_attributes['osm_keys'], osm_query=station_osm_query)
+# raw_station_gdf = extract(osm_path=study_area_dump_path, geo_type='points',
+#                           osm_keys=station_attributes['osm_keys'], osm_query=station_osm_query)
 
-station_gdf = filter_on_other_tags(
-    attributes=station_attributes, other_tags_keys=station_attributes['other_tags'], gdf=raw_station_gdf,
-    dropna=["train"]
-)
+# station_gdf = filter_on_other_tags(
+#     attributes=station_attributes, other_tags_keys=station_attributes['other_tags'], gdf=raw_station_gdf,
+#     dropna=["train"]
+# )
 
 ## Alternative extraction package and method: Use damagescanner to retrieve railway
 # all_rail = retrieve(osm_path=str(study_area_dump_path), geo_type='lines',
@@ -81,7 +81,9 @@ station_gdf = filter_on_other_tags(
 # rail_gdf = all_rail[all_rail['railway'] == 'rail']
 
 ## Find possible terminals
-rail_network = detect_possible_terminals(network_gdf=rail_track_gdf, aggregation_range=0.0001)
+rail_network = detect_possible_terminals(network_gdf=rail_track_gdf, aggregation_range=0.001)
 a = 1
 
-# ToDo: create a connected network from the included nodes and graphs
+# ToDo: complete _get_demand_link_attributes: add attribute "demand_link" to the graph_edges and update the value
+#  respectively + Convert networkx to network(nodes and edges are gdf)
+#  ToDo: simplify railway network, e.g., around the yard area
