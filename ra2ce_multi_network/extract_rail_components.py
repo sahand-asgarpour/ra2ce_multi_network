@@ -81,9 +81,11 @@ rail_track_gdf = filter_on_other_tags(
 # rail_gdf = all_rail[all_rail['railway'] == 'rail']
 
 ## Find possible terminals
-rail_network = detect_possible_terminals(network_gdf=rail_track_gdf, aggregation_range=0.001)
+complex_rail_network = get_rail_network_with_terminals(network_gdf=rail_track_gdf, aggregation_range=0.001)
+simplified_rail_network = simplify_rail(network=complex_rail_network)
 a = 1
 
-# ToDo: complete _get_demand_link_attributes: add attribute "demand_link" to the graph_edges and update the value
-#  respectively + Convert networkx to network(nodes and edges are gdf)
-#  ToDo: simplify railway network, e.g., around the yard area
+
+#  ToDo: simplify railway network, e.g., merge_lines and around the yard area
+#  ToDo: Debug merge_lines 1028 key error
+#  ToDo: Update the Jupyter notebook and check the results: adding demand links and etc.
