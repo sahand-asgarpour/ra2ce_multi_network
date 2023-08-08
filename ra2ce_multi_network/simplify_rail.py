@@ -19,6 +19,7 @@ def get_rail_network_with_terminals(network_gdf: gpd.GeoDataFrame, aggregation_r
     network.nodes = _aggregate_terminal_nodes(network, aggregation_range=aggregation_range)
     # Add demand links between aggregate_terminal nodes and network nodes
     network = _add_demand_link(network)
+    network = _reset_indices(network)
     return network
 
 
@@ -164,6 +165,12 @@ def _add_demand_link(network: snkit.network.Network) -> snkit.network.Network:
     network = _get_demand_link_attributes(network)
 
     return network
+
+
+def _reset_indices(network: snkit.network.Network) -> snkit.network.Network:
+    updated_nodes = network.nodes.reset_index(drop=True)
+    updated_edges = network.edges.reset_index(drop=True)
+    return Network(nodes=updated_nodes, edges=updated_edges)
 
 
 def _get_demand_link_attributes(network: snkit.network.Network) -> snkit.network.Network:

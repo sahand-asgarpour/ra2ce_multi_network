@@ -87,5 +87,6 @@ a = 1
 
 
 #  ToDo: simplify railway network, e.g., merge_lines and around the yard area
-#  ToDo: Debug merge_lines 1028 key error
+#  ToDo: check if the _exclude_edge_types works correctly
+#  ToDo: make sure the attributes merge correctly.
 #  ToDo: Update the Jupyter notebook and check the results: adding demand links and etc.
