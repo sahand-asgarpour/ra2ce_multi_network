@@ -1,5 +1,5 @@
 from networkx import MultiDiGraph, Graph
-from typing import Union
+from typing import Union, List
 
 import geopandas as gpd
 import numpy as np
@@ -258,24 +258,14 @@ def _find_hanging_nodes(network: snkit.network.Network) -> np.ndarray:
     return np.where(deg == 1)[0]
 
 
-# def _calculate_degree(network: snkit.network.Network) -> np.ndarray:
-#     """ based on trails.simplify
-#     """
-#     # the number of nodes(from index) to use as the number of bins
-#     ndC = len(network.nodes.index)
-#     if ndC - 1 > max(network.edges.from_id) and ndC - 1 > max(network.edges.to_id): print(
-#         "Calculate_degree possibly unhappy")
-#     return np.bincount(network.edges['from_id'], None, ndC) + np.bincount(network.edges['to_id'], None, ndC)
-
-
 def _calculate_degree(network: snkit.network.Network) -> np.ndarray:
     # Get the maximum node ID from both 'from_id' and 'to_id' arrays
-    max_node_id = max(max(network.edges['from_id']), max(network.edges['to_id']))
+    max_node_id = int(max(max(network.edges['from_id']), max(network.edges['to_id'])))
     # Initialize a weights array to count the degrees for each node
     degrees = np.zeros(max_node_id + 1)
-    # Calculate the degree for the 'from_id' array and add it to the weights
+    # Calculate the degree for the 'from_id' array and add it to degrees
     np.add.at(degrees, network.edges['from_id'], 1)
-    # Calculate the degree for the 'to_id' array and add it to the weights
+    # Calculate the degree for the 'to_id' array and add it to degrees
     np.add.at(degrees, network.edges['to_id'], 1)
 
     return degrees
@@ -288,6 +278,27 @@ def _check_terminal_criteria(from_node_id: int, to_node_id: int, edge_property: 
         return to_node_id
 
 
+def simplify_rail(network: snkit.network.Network) -> snkit.network.Network:
+    network = _merge_edges(network, excluded_edge_types=['bridge', 'tunnel'])
+    return network
+
+
+def _merge_edges(network: snkit.network.Network, excluded_edge_types: List[str]) -> snkit.network.Network:
+    # _merge_edges starts here. add the degree column to nodes and put it high for the excluded_edge_types objects
+    network = _get_nodes_degree(network)
+    # _exclude_edge_types()
+    # merge_edges
+    cols = [col for col in network.edges.columns if col != 'geometry']
+    network = merge_edges_modified(network, by=excluded_edge_types, aggfunc={
+        col: (
+            lambda col_data: '; '.join(filter(None, col_data.unique())) if col_data.dtype == 'O' else col_data.iloc[0])
+        for col in cols
+    })
+    # update teh degree column with normal values
+    network = _get_nodes_degree(network)
+    return network
+
+
 def _get_nodes_degree(network: snkit.network.Network) -> snkit.network.Network:
     degrees = _calculate_degree(network)
     node_degrees_dict = {node_id: degree for node_id, degree in enumerate(degrees) if degree > 0}
@@ -295,31 +306,236 @@ def _get_nodes_degree(network: snkit.network.Network) -> snkit.network.Network:
     return network
 
 
-def _merge_edges(network: snkit.network.Network, excluded_edge_types: list) -> snkit.network.Network:
-    # _merge_edges starts after this function
-    def _exclude_edge_types():
-        degree_2_nodes = network.nodes[network.nodes['degree'] == 2]
-        for excluded_edge_type in excluded_edge_types:
-            if excluded_edge_type not in network.edges.columns.tolist():
-                raise ValueError(f"{excluded_edge_type} does not exist.")
-            # Check if the nodes with degree 2 are connected to excluded_edge
-            connected_to_ex_ed = degree_2_nodes.apply(lambda row:
-                                                      any(network.edges[(network.edges['from_id'] == row['id']) |
-                                                                        (network.edges['to_id'] == row['id'])][
-                                                              excluded_edge_type] == 1), axis=1)
+def merge_edges_modified(network: snkit.network.Network, aggfunc: Union[str, dict], by: Union[str, list],
+                         id_col="id") -> snkit.network.Network:
+    if "degree" not in network.nodes.columns:
+        network.nodes["degree"] = network.nodes[id_col].apply(
+            lambda x: node_connectivity_degree(x, network)
+        )
 
-            network.nodes.loc[network.nodes['id'].isin(degree_2_nodes.loc[connected_to_ex_ed, 'id']), 'degree'] = 1e10
+    degree2 = list(network.nodes[id_col].loc[network.nodes.degree == 2])
+    d2_set = set(degree2)
+    edge_paths = []
 
-    # _merge_edges starts here. add the degree column to nodes and put it high for the excluded_edge_types objects
-    network = _get_nodes_degree(network)
-    _exclude_edge_types()
-    # merge_edges
-    network = merge_edges(network)
-    # update teh degree column with normal values
-    network = _get_nodes_degree(network)
-    return network
+    while d2_set:
+        if len(d2_set) % 1000 == 0:
+            print(len(d2_set))
+        popped_node = d2_set.pop()
+        node_path = set([popped_node])
+        candidates = set([popped_node])
+        while candidates:
+            popped_cand = candidates.pop()
+            matches = set(
+                np.unique(
+                    network.edges[["from_id", "to_id"]]
+                    .loc[
+                        (network.edges.from_id == popped_cand)
+                        | (network.edges.to_id == popped_cand)
+                        ]
+                    .values
+                )
+            )
+            matches.remove(popped_cand)
+            matches = matches - node_path
+            for match in matches:
+                if match in degree2:
+                    candidates.add(match)
+                    node_path.add(match)
+                    d2_set.remove(match)
+                else:
+                    node_path.add(match)
+        if len(node_path) > 2:
+            edge_paths.append(
+                network.edges.loc[
+                    (network.edges.from_id.isin(node_path))
+                    & (network.edges.to_id.isin(node_path))
+                    ]
+            )
+
+    concat_edge_paths = []
+    unique_edge_ids = set()
+    new_node_ids = set(network.nodes[id_col]) - set(degree2)
+
+    for edge_path in tqdm(edge_paths, desc="merge_edge_paths"):
+        unique_edge_ids.update(list(edge_path[id_col]))
+        unique_values_dict = {}
+
+        for col in by:
+            unique_values_dict[col] = edge_path[col].unique()
+
+        # Convert None values to a placeholder value
+        placeholder = "None"
+        for col in by:
+            edge_path[col] = edge_path[col].fillna(placeholder)
+
+        # Perform dissolve operation
+        edge_path = edge_path.dissolve(by=by, aggfunc=aggfunc)
+
+        # Replace the placeholder value back to None
+        edge_path.replace(placeholder, None, inplace=True)
+
+        # edge_path = edge_path.dissolve(by=by, aggfunc=aggfunc)
+        edge_path_dicts = []
+
+        for edge in edge_path.itertuples(index=False):
+            if edge.geometry.geom_type == "MultiLineString":
+                edge_geom = linemerge(edge.geometry)
+                if edge_geom.geom_type == "MultiLineString":
+                    edge_geoms = list(edge_geom.geoms)
+                else:
+                    edge_geoms = [edge_geom]
+            else:
+                edge_geoms = [edge.geometry]
+
+            for geom in edge_geoms:
+                start, end = line_endpoints(geom)
+                start = nearest_node(start, network.nodes)
+                end = nearest_node(end, network.nodes)
+                edge_path_dict = {
+                    "from_id": start[id_col],
+                    "to_id": end[id_col],
+                    "geometry": geom,
+                }
+                for col in by:
+                    edge_path_dict[col] = '; '.join(str(item) if item is not None else placeholder
+                                                    for item in unique_values_dict[col])
+
+                for i, col in enumerate(edge_path.columns):
+                    if col not in ("from_id", "to_id", "geometry") and col not in by:
+                        edge_path_dict[col] = edge[i]
+
+                edge_path_dicts.append(edge_path_dict)
+
+        concat_edge_paths.append(geopandas.GeoDataFrame(edge_path_dicts))
+        new_node_ids.update(list(edge_path.from_id) + list(edge_path.to_id))
+
+    edges_new = network.edges.copy()
+    edges_new = edges_new.loc[~(edges_new.id.isin(list(unique_edge_ids)))]
+    edges_new.geometry = edges_new.geometry.apply(merge_multilinestring)
+    edges = pd.concat(
+        [edges_new, pd.concat(concat_edge_paths).reset_index(drop=True)], sort=False
+    ).applymap(lambda x: None if pd.isna(x) or x == '' else x)
+
+    nodes = network.nodes.set_index(id_col).loc[list(new_node_ids)].copy().reset_index()
+
+    return Network(nodes=nodes, edges=edges)
 
 
-def simplify_rail(network: snkit.network.Network) -> snkit.network.Network:
-    network = _merge_edges(network=network, excluded_edge_types=['bridge', 'tunnel'])
-    return network
+# def merge_edges_modified(network: snkit.network.Network, aggfunc: Union[str, dict], by: Union[str, list], id_col="id")\
+#         -> snkit.network.Network:
+#     """
+#     Based on snkit.network.
+#     aggfunc is added. Modified to resolve error for edge_geoms = list(edge_geom)
+#
+#     Merge edges that share a node with a connectivity degree of 2
+#
+#     Parameters
+#     ----------
+#     network : snkit.network.Network
+#     id_col : string
+#     by : List[string], optional
+#       list of columns to use when merging an edge path - will not merge if
+#       edges have different values.
+#     aggfunc : Aggregation function for manipulation of data associated with each group
+#     """
+#     if "degree" not in network.nodes.columns:
+#         network.nodes["degree"] = network.nodes[id_col].apply(
+#             lambda x: node_connectivity_degree(x, network)
+#         )
+#
+#     degree2 = list(network.nodes[id_col].loc[network.nodes.degree == 2])
+#     d2_set = set(degree2)
+#     edge_paths = []
+#
+#     while d2_set:
+#         if len(d2_set) % 1000 == 0:
+#             print(len(d2_set))
+#         popped_node = d2_set.pop()
+#         node_path = set([popped_node])
+#         candidates = set([popped_node])
+#         while candidates:
+#             popped_cand = candidates.pop()
+#             matches = set(
+#                 np.unique(
+#                     network.edges[["from_id", "to_id"]]
+#                     .loc[
+#                         (network.edges.from_id == popped_cand)
+#                         | (network.edges.to_id == popped_cand)
+#                         ]
+#                     .values
+#                 )
+#             )
+#             matches.remove(popped_cand)
+#             matches = matches - node_path
+#             for match in matches:
+#                 if match in degree2:
+#                     candidates.add(match)
+#                     node_path.add(match)
+#                     d2_set.remove(match)
+#                 else:
+#                     node_path.add(match)
+#         if len(node_path) > 2:
+#             edge_paths.append(
+#                 network.edges.loc[
+#                     (network.edges.from_id.isin(node_path))
+#                     & (network.edges.to_id.isin(node_path))
+#                     ]
+#             )
+#
+#     concat_edge_paths = []
+#     unique_edge_ids = set()
+#     new_node_ids = set(network.nodes[id_col]) - set(degree2)
+#
+#     for edge_path in tqdm(edge_paths, desc="merge_edge_paths"):
+#         unique_edge_ids.update(list(edge_path[id_col]))
+#         edge_path = edge_path.dissolve(by=by, aggfunc=aggfunc)
+#         edge_path_dicts = []
+#         for edge in edge_path.itertuples(index=False):
+#             if edge.geometry.geom_type == "MultiLineString":
+#                 edge_geom = linemerge(edge.geometry)
+#                 if edge_geom.geom_type == "MultiLineString":
+#                     edge_geoms = list(edge_geom.geoms)
+#                 else:
+#                     edge_geoms = [edge_geom]
+#             else:
+#                 edge_geoms = [edge.geometry]
+#             for geom in edge_geoms:
+#                 start, end = line_endpoints(geom)
+#                 start = nearest_node(start, network.nodes)
+#                 end = nearest_node(end, network.nodes)
+#                 edge_path_dict = {
+#                     "from_id": start[id_col],
+#                     "to_id": end[id_col],
+#                     "geometry": geom,
+#                 }
+#                 for i, col in enumerate(edge_path.columns):
+#                     if col not in ("from_id", "to_id", "geometry"):
+#                         edge_path_dict[col] = edge[i]
+#                 edge_path_dicts.append(edge_path_dict)
+#
+#         concat_edge_paths.append(geopandas.GeoDataFrame(edge_path_dicts))
+#         new_node_ids.update(list(edge_path.from_id) + list(edge_path.to_id))
+#
+#     edges_new = network.edges.copy()
+#     edges_new = edges_new.loc[~(edges_new.id.isin(list(unique_edge_ids)))]
+#     edges_new.geometry = edges_new.geometry.apply(merge_multilinestring)
+#     edges = pd.concat(
+#         [edges_new, pd.concat(concat_edge_paths).reset_index()], sort=False
+#     ).applymap(lambda x: None if pd.isna(x) else x)
+#
+#     nodes = network.nodes.set_index(id_col).loc[list(new_node_ids)].copy().reset_index()
+#
+#     return Network(nodes=nodes, edges=edges)
+
+def _exclude_edge_types(net: snkit.network.Network, ex_edge_types: list):
+    degree_2_nodes = net.nodes[net.nodes['degree'] == 2]
+    for ex_edge_type in ex_edge_types:
+        if ex_edge_type not in net.edges.columns.tolist():
+            raise ValueError(f"{ex_edge_type} does not exist.")
+        # Check if the nodes with degree 2 are connected to excluded_edge
+        connected_to_ex_ed = degree_2_nodes.apply(lambda row:
+                                                  any(net.edges[(net.edges['from_id'] == row['id']) |
+                                                                (net.edges['to_id'] == row['id'])]
+                                                      [ex_edge_type].notna()), axis=1)
+
+        net.nodes.loc[net.nodes['id'].isin(degree_2_nodes.loc[connected_to_ex_ed, 'id']), 'degree'] = 1e10
