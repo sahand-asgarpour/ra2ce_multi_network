@@ -18,8 +18,9 @@ def get_rail_network_with_terminals(network_gdf: gpd.GeoDataFrame, aggregation_r
     # Merge possible_terminal based on an aggregation_range
     network.nodes = _aggregate_terminal_nodes(network, aggregation_range=aggregation_range)
     # Add demand links between aggregate_terminal nodes and network nodes
-    network = _add_demand_link(network)
+    network = _add_demand_edge(network)
     network = _reset_indices(network)
+    network.set_crs(crs="EPSG:4326")
     return network
 
 
@@ -110,6 +111,9 @@ def _aggregate_terminal_nodes(network: snkit.network.Network, aggregation_range:
     node_gdf['aggregate'] = node_gdf.apply(
         lambda row: 1 if row['possible_terminal'] == 1 else 'n.a.', axis=1)
     if aggregation_range == 0:
+        node_gdf['terminal_collection'] = node_gdf.apply(
+            lambda row: list(row['terminal_collection']) if isinstance(row['terminal_collection'], set) else
+            row['possible_terminal'], axis=1)
         return node_gdf
 
     node_gdf['buffer'] = node_gdf.apply(
@@ -135,7 +139,7 @@ def _aggregate_terminal_nodes(network: snkit.network.Network, aggregation_range:
     return node_gdf
 
 
-def _add_demand_link(network: snkit.network.Network) -> snkit.network.Network:
+def _add_demand_edge(network: snkit.network.Network) -> snkit.network.Network:
     node_gdf = network.nodes
     edge_columns = network.edges.columns
     aggregate_demand_nodes = node_gdf[(node_gdf['aggregate'] == 1) & (node_gdf['terminal_collection'].str.len() > 1)]
@@ -146,7 +150,7 @@ def _add_demand_link(network: snkit.network.Network) -> snkit.network.Network:
                 (row['geometry'].x, row['geometry'].y),
                 (node_gdf.loc[child_ter_id, 'geometry'].x, node_gdf.loc[child_ter_id, 'geometry'].y)
             ]),
-            'demand_link': int(1),
+            'demand_edge': int(1),
             'from_id': row['id'],
             'to_id': child_ter_id,
             **{column: None for column in edge_columns if column not in ['geometry', 'id', 'from_id', 'to_id']}
@@ -159,10 +163,10 @@ def _add_demand_link(network: snkit.network.Network) -> snkit.network.Network:
     if new_edges_data:
         new_edges_df = gpd.GeoDataFrame(new_edges_data, crs=node_gdf.crs)
         network.edges = pd.concat([network.edges, new_edges_df], ignore_index=True)
-        network.edges['demand_link'].fillna(0, inplace=True)
+        network.edges['demand_edge'].fillna(0, inplace=True)
         network.edges['id'] = range(len(network.edges))
 
-    network = _get_demand_link_attributes(network)
+    network = _get_demand_edge_attributes(network)
 
     return network
 
@@ -173,7 +177,7 @@ def _reset_indices(network: snkit.network.Network) -> snkit.network.Network:
     return Network(nodes=updated_nodes, edges=updated_edges)
 
 
-def _get_demand_link_attributes(network: snkit.network.Network) -> snkit.network.Network:
+def _get_demand_edge_attributes(network: snkit.network.Network) -> snkit.network.Network:
     edge_cols = network.edges.columns.tolist()
     node_cols = network.nodes.columns.tolist()
     network_x = _to_networkx(network=network, directed=False, node_attributes=node_cols, edge_attributes=edge_cols)
@@ -182,7 +186,7 @@ def _get_demand_link_attributes(network: snkit.network.Network) -> snkit.network
     for _, row in aggregate_demand_nodes.iterrows():
         for child_ter_id in row['terminal_collection']:
             neighbor_edges = list(network_x.edges(child_ter_id, data=True))
-            edge_to_update_info = [edge for edge in neighbor_edges if edge[2]['demand_link'] == 1]
+            edge_to_update_info = [edge for edge in neighbor_edges if edge[2]['demand_edge'] == 1]
 
             if len(edge_to_update_info) == 1 and len(neighbor_edges) > 1:
                 edge_to_update = edge_to_update_info[0]
@@ -279,7 +283,7 @@ def _check_terminal_criteria(from_node_id: int, to_node_id: int, edge_property: 
 
 
 def simplify_rail(network: snkit.network.Network) -> snkit.network.Network:
-    network = _merge_edges(network, excluded_edge_types=['bridge', 'tunnel', 'demand_link'])
+    network = _merge_edges(network, excluded_edge_types=['bridge', 'tunnel'])
     return network
 
 
@@ -288,11 +292,29 @@ def _merge_edges(network: snkit.network.Network, excluded_edge_types: List[str])
     network = _get_nodes_degree(network)
     # merge_edges
     cols = [col for col in network.edges.columns if col != 'geometry']
-    network = merge_edges_modified(network, by=excluded_edge_types, aggfunc={
-        col: (
-            lambda col_data: '; '.join(filter(None, col_data)) if col_data.dtype == 'O' else col_data.iloc[0])
-        for col in cols
-    })
+
+    if 'demand_edge' not in excluded_edge_types:
+        aggfunc = {
+            col: (
+                lambda col_data: '; '.join(str(item) for item in col_data if isinstance(item, str))
+                if col_data.dtype == 'O'
+                else col_data.iloc[0]
+                if col != "demand_edge"
+                else max(col_data)
+            )
+            for col in cols
+        }
+    else:
+        aggfunc = {
+            col: (
+                lambda col_data: '; '.join(str(item) for item in col_data if isinstance(item, str))
+                if col_data.dtype == 'O'
+                else col_data.iloc[0]
+            )
+            for col in cols
+        }
+
+    network = merge_edges_modified(network, by=excluded_edge_types, aggfunc=aggfunc)
     # update teh degree column with normal values
     network = _get_nodes_degree(network)
     return network

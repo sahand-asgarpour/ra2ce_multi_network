@@ -11,26 +11,29 @@ from ra2ce_multi_network.deeper_extraction import filter_on_other_tags
 from ra2ce_multi_network.simplify_rail import *
 
 ## Defining ini variables
-dump_folder = Path(
+root_folder = Path(
     # r'C:\Users\asgarpou\OneDrive - Stichting Deltares\Documents\Projects\SITO_Netwerk to system\content\input_data\pbf'
-    r'C:\Users\asgarpou\osm\osm_bpf'
+    r'C:\Users\asgarpou\osm'
 )
 # dump-related
 country_iso3 = "NLD"
 country = DICT_GEOFABRIK[country_iso3][1]
-study_area_suffix = '_test'
+study_area_suffix = '_ROTTERDAM_PORT'
 
 # Clipping-related
 clip_polygon_path = Path(
     rf'C:\Users\asgarpou\osm\osm_bpf\POLYGON{study_area_suffix}.geojson'
 )
 clip_output_name = f'study_area{study_area_suffix}'
-study_area_dump_path = dump_folder.joinpath(f'{clip_output_name}.osm.pbf')
+study_area_dump_path = root_folder.joinpath('osm_bpf', f'{clip_output_name}.osm.pbf')
 
 # Extraction-related
 default_osm_keys = DICT_CIS_OSM['rail']['osm_keys']
+extract_path = root_folder.joinpath('extracts')
 
 # source: https://taginfo.openstreetmap.org/tags/railway=rail#combinations
+# 'other_tags' key is a string chain of 'tags' => 'keys',
+# where relavant information is stored. e.g., whether traffic mode is freight or mixed
 rail_track_attributes = {
     'osm_keys': [
         'railway', 'name', 'gauge', 'electrified', 'voltage', 'bridge', 'maxspeed', 'service', 'tunnel', 'other_tags'
@@ -61,11 +64,11 @@ station_osm_query = """railway='station'"""
 
 ## Extract required system components
 
-raw_rail_track_gdf = extract(osm_path=study_area_dump_path, geo_type='lines',
-                             osm_keys=rail_track_attributes['osm_keys'], osm_query=rail_track_osm_query)
-
-rail_track_gdf = filter_on_other_tags(
-    attributes=rail_track_attributes, other_tags_keys=rail_track_attributes['other_tags'], gdf=raw_rail_track_gdf)
+# raw_rail_track_gdf = extract(osm_path=study_area_dump_path, geo_type='lines',
+#                              osm_keys=rail_track_attributes['osm_keys'], osm_query=rail_track_osm_query)
+#
+# rail_track_gdf = filter_on_other_tags(
+#     attributes=rail_track_attributes, other_tags_keys=rail_track_attributes['other_tags'], gdf=raw_rail_track_gdf)
 
 # raw_station_gdf = extract(osm_path=study_area_dump_path, geo_type='points',
 #                           osm_keys=station_attributes['osm_keys'], osm_query=station_osm_query)
@@ -80,11 +83,14 @@ rail_track_gdf = filter_on_other_tags(
 #                     key_col=rail_osm_keys, **{"service": [" IS NOT NULL"]})
 # rail_gdf = all_rail[all_rail['railway'] == 'rail']
 
+## Load extracted network elements
+rail_track_file = root_folder.joinpath(f'rail_track{clip_output_name}.geojson')
+rail_track_gdf = gpd.read_file(rail_track_file)
+
 ## Find possible terminals
 complex_rail_network = get_rail_network_with_terminals(network_gdf=rail_track_gdf, aggregation_range=0.001)
 simplified_rail_network = simplify_rail(network=complex_rail_network)
 a = 1
-
 
 #  ToDo: simplify railway network, around the yard/emplacement area
 
