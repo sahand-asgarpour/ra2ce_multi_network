@@ -86,7 +86,6 @@ simplified_rail_network = simplify_rail(network=complex_rail_network)
 a = 1
 
 
-#  ToDo: simplify railway network, e.g., merge_lines => check if the shit is done correctly! and around the yard area
 #  ToDo: simplify railway network, around the yard/emplacement area
 
 #  ToDo: make sure the attributes merge correctly.

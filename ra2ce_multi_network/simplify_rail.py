@@ -279,19 +279,18 @@ def _check_terminal_criteria(from_node_id: int, to_node_id: int, edge_property: 
 
 
 def simplify_rail(network: snkit.network.Network) -> snkit.network.Network:
-    network = _merge_edges(network, excluded_edge_types=['bridge', 'tunnel'])
+    network = _merge_edges(network, excluded_edge_types=['bridge', 'tunnel', 'demand_link'])
     return network
 
 
 def _merge_edges(network: snkit.network.Network, excluded_edge_types: List[str]) -> snkit.network.Network:
     # _merge_edges starts here. add the degree column to nodes and put it high for the excluded_edge_types objects
     network = _get_nodes_degree(network)
-    # _exclude_edge_types()
     # merge_edges
     cols = [col for col in network.edges.columns if col != 'geometry']
     network = merge_edges_modified(network, by=excluded_edge_types, aggfunc={
         col: (
-            lambda col_data: '; '.join(filter(None, col_data.unique())) if col_data.dtype == 'O' else col_data.iloc[0])
+            lambda col_data: '; '.join(filter(None, col_data)) if col_data.dtype == 'O' else col_data.iloc[0])
         for col in cols
     })
     # update teh degree column with normal values
@@ -358,10 +357,6 @@ def merge_edges_modified(network: snkit.network.Network, aggfunc: Union[str, dic
 
     for edge_path in tqdm(edge_paths, desc="merge_edge_paths"):
         unique_edge_ids.update(list(edge_path[id_col]))
-        unique_values_dict = {}
-
-        for col in by:
-            unique_values_dict[col] = edge_path[col].unique()
 
         # Convert None values to a placeholder value
         placeholder = "None"
@@ -369,15 +364,20 @@ def merge_edges_modified(network: snkit.network.Network, aggfunc: Union[str, dic
             edge_path[col] = edge_path[col].fillna(placeholder)
 
         # Perform dissolve operation
-        edge_path = edge_path.dissolve(by=by, aggfunc=aggfunc)
+        edge_path = edge_path.dissolve(by=by, aggfunc=aggfunc, sort=False)
 
         # Replace the placeholder value back to None
         edge_path.replace(placeholder, None, inplace=True)
 
-        # edge_path = edge_path.dissolve(by=by, aggfunc=aggfunc)
         edge_path_dicts = []
+        by_indices = [edge_path.columns.get_loc(col) for col in by]
 
         for edge in edge_path.itertuples(index=False):
+            group_by_values_dict = {}
+
+            for col, col_index in zip(by, by_indices):
+                group_by_values_dict[col] = edge[col_index]
+
             if edge.geometry.geom_type == "MultiLineString":
                 edge_geom = linemerge(edge.geometry)
                 if edge_geom.geom_type == "MultiLineString":
@@ -397,8 +397,7 @@ def merge_edges_modified(network: snkit.network.Network, aggfunc: Union[str, dic
                     "geometry": geom,
                 }
                 for col in by:
-                    edge_path_dict[col] = '; '.join(str(item) if item is not None else placeholder
-                                                    for item in unique_values_dict[col])
+                    edge_path_dict[col] = group_by_values_dict[col]
 
                 for i, col in enumerate(edge_path.columns):
                     if col not in ("from_id", "to_id", "geometry") and col not in by:
