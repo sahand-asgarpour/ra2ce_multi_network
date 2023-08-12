@@ -327,58 +327,13 @@ def _get_nodes_degree(network: snkit.network.Network) -> snkit.network.Network:
     return network
 
 
-def merge_edges_modified(network: snkit.network.Network, aggfunc: Union[str, dict], by: Union[str, list],
-                         id_col="id") -> snkit.network.Network:
-    if "degree" not in network.nodes.columns:
-        network.nodes["degree"] = network.nodes[id_col].apply(
-            lambda x: node_connectivity_degree(x, network)
-        )
-
-    degree2 = list(network.nodes[id_col].loc[network.nodes.degree == 2])
-    d2_set = set(degree2)
-    edge_paths = []
-
-    while d2_set:
-        if len(d2_set) % 1000 == 0:
-            print(len(d2_set))
-        popped_node = d2_set.pop()
-        node_path = set([popped_node])
-        candidates = set([popped_node])
-        while candidates:
-            popped_cand = candidates.pop()
-            matches = set(
-                np.unique(
-                    network.edges[["from_id", "to_id"]]
-                    .loc[
-                        (network.edges.from_id == popped_cand)
-                        | (network.edges.to_id == popped_cand)
-                        ]
-                    .values
-                )
-            )
-            matches.remove(popped_cand)
-            matches = matches - node_path
-            for match in matches:
-                if match in degree2:
-                    candidates.add(match)
-                    node_path.add(match)
-                    d2_set.remove(match)
-                else:
-                    node_path.add(match)
-        if len(node_path) > 2:
-            edge_paths.append(
-                network.edges.loc[
-                    (network.edges.from_id.isin(node_path))
-                    & (network.edges.to_id.isin(node_path))
-                    ]
-            )
-
+def _get_new_path_to_group_info(id_column: str, new_node_ids: set, paths_to_group: list, by: list,
+                                aggfunc: Union[str, dict], net: snkit.network.Network) -> tuple:
     concat_edge_paths = []
     unique_edge_ids = set()
-    new_node_ids = set(network.nodes[id_col]) - set(degree2)
 
-    for edge_path in tqdm(edge_paths, desc="merge_edge_paths"):
-        unique_edge_ids.update(list(edge_path[id_col]))
+    for edge_path in tqdm(paths_to_group, desc="merge_edge_paths"):
+        unique_edge_ids.update(list(edge_path[id_column]))
 
         # Convert None values to a placeholder value
         placeholder = "None"
@@ -411,11 +366,11 @@ def merge_edges_modified(network: snkit.network.Network, aggfunc: Union[str, dic
 
             for geom in edge_geoms:
                 start, end = line_endpoints(geom)
-                start = nearest_node(start, network.nodes)
-                end = nearest_node(end, network.nodes)
+                start = nearest_node(start, net.nodes)
+                end = nearest_node(end, net.nodes)
                 edge_path_dict = {
-                    "from_id": start[id_col],
-                    "to_id": end[id_col],
+                    "from_id": start[id_column],
+                    "to_id": end[id_column],
                     "geometry": geom,
                 }
                 for col in by:
@@ -429,6 +384,120 @@ def merge_edges_modified(network: snkit.network.Network, aggfunc: Union[str, dic
 
         concat_edge_paths.append(geopandas.GeoDataFrame(edge_path_dicts))
         new_node_ids.update(list(edge_path.from_id) + list(edge_path.to_id))
+    return new_node_ids, unique_edge_ids, concat_edge_paths
+
+
+def merge_edges_modified(network: snkit.network.Network, aggfunc: Union[str, dict], by: Union[str, list],
+                         id_col="id") -> snkit.network.Network:
+    if "degree" not in network.nodes.columns:
+        network.nodes["degree"] = network.nodes[id_col].apply(
+            lambda x: node_connectivity_degree(x, network)
+        )
+
+    degree_2 = list(network.nodes[id_col].loc[network.nodes.degree == 2])
+    degree_2_set = set(degree_2)
+    edge_paths = _get_edge_paths(degree_2_set, network)
+
+    # edge_paths = []
+    # while degree_2_set:
+    #     if len(degree_2_set) % 1000 == 0:
+    #         print(len(degree_2_set))
+    #     popped_node = degree_2_set.pop()
+    #     node_path = set([popped_node])
+    #     candidates = set([popped_node])
+    #     while candidates:
+    #         popped_cand = candidates.pop()
+    #         matches = set(
+    #             np.unique(
+    #                 network.edges[["from_id", "to_id"]]
+    #                 .loc[
+    #                     (network.edges.from_id == popped_cand)
+    #                     | (network.edges.to_id == popped_cand)
+    #                     ]
+    #                 .values
+    #             )
+    #         )
+    #         matches.remove(popped_cand)
+    #         matches = matches - node_path
+    #         for match in matches:
+    #             if match in degree_2:
+    #                 candidates.add(match)
+    #                 node_path.add(match)
+    #                 degree_2_set.remove(match)
+    #             else:
+    #                 node_path.add(match)
+    #     if len(node_path) > 2:
+    #         edge_paths.append(
+    #             network.edges.loc[
+    #                 (network.edges.from_id.isin(node_path))
+    #                 & (network.edges.to_id.isin(node_path))
+    #                 ]
+    #         )
+
+    new_node_ids = set(network.nodes[id_col]) - set(degree_2)
+    new_node_ids, unique_edge_ids, concat_edge_paths = _get_new_path_to_group_info(id_column=id_col,
+                                                                                   new_node_ids=new_node_ids,
+                                                                                   paths_to_group=edge_paths,
+                                                                                   by=by,
+                                                                                   aggfunc=aggfunc,
+                                                                                   net=network)
+
+    # concat_edge_paths = []
+    # unique_edge_ids = set()
+    # new_node_ids = set(network.nodes[id_col]) - set(degree_2)
+
+    # for edge_path in tqdm(edge_paths, desc="merge_edge_paths"):
+    #     unique_edge_ids.update(list(edge_path[id_col]))
+    #
+    #     # Convert None values to a placeholder value
+    #     placeholder = "None"
+    #     for col in by:
+    #         edge_path[col] = edge_path[col].fillna(placeholder)
+    #
+    #     # Perform dissolve operation
+    #     edge_path = edge_path.dissolve(by=by, aggfunc=aggfunc, sort=False)
+    #
+    #     # Replace the placeholder value back to None
+    #     edge_path.replace(placeholder, None, inplace=True)
+    #
+    #     edge_path_dicts = []
+    #     by_indices = [edge_path.columns.get_loc(col) for col in by]
+    #
+    #     for edge in edge_path.itertuples(index=False):
+    #         group_by_values_dict = {}
+    #
+    #         for col, col_index in zip(by, by_indices):
+    #             group_by_values_dict[col] = edge[col_index]
+    #
+    #         if edge.geometry.geom_type == "MultiLineString":
+    #             edge_geom = linemerge(edge.geometry)
+    #             if edge_geom.geom_type == "MultiLineString":
+    #                 edge_geoms = list(edge_geom.geoms)
+    #             else:
+    #                 edge_geoms = [edge_geom]
+    #         else:
+    #             edge_geoms = [edge.geometry]
+    #
+    #         for geom in edge_geoms:
+    #             start, end = line_endpoints(geom)
+    #             start = nearest_node(start, network.nodes)
+    #             end = nearest_node(end, network.nodes)
+    #             edge_path_dict = {
+    #                 "from_id": start[id_col],
+    #                 "to_id": end[id_col],
+    #                 "geometry": geom,
+    #             }
+    #             for col in by:
+    #                 edge_path_dict[col] = group_by_values_dict[col]
+    #
+    #             for i, col in enumerate(edge_path.columns):
+    #                 if col not in ("from_id", "to_id", "geometry") and col not in by:
+    #                     edge_path_dict[col] = edge[i]
+    #
+    #             edge_path_dicts.append(edge_path_dict)
+    #
+    #     concat_edge_paths.append(geopandas.GeoDataFrame(edge_path_dicts))
+    #     new_node_ids.update(list(edge_path.from_id) + list(edge_path.to_id))
 
     edges_new = network.edges.copy()
     edges_new = edges_new.loc[~(edges_new.id.isin(list(unique_edge_ids)))]
@@ -442,111 +511,45 @@ def merge_edges_modified(network: snkit.network.Network, aggfunc: Union[str, dic
     return Network(nodes=nodes, edges=edges)
 
 
-# def merge_edges_modified(network: snkit.network.Network, aggfunc: Union[str, dict], by: Union[str, list], id_col="id")\
-#         -> snkit.network.Network:
-#     """
-#     Based on snkit.network.
-#     aggfunc is added. Modified to resolve error for edge_geoms = list(edge_geom)
-#
-#     Merge edges that share a node with a connectivity degree of 2
-#
-#     Parameters
-#     ----------
-#     network : snkit.network.Network
-#     id_col : string
-#     by : List[string], optional
-#       list of columns to use when merging an edge path - will not merge if
-#       edges have different values.
-#     aggfunc : Aggregation function for manipulation of data associated with each group
-#     """
-#     if "degree" not in network.nodes.columns:
-#         network.nodes["degree"] = network.nodes[id_col].apply(
-#             lambda x: node_connectivity_degree(x, network)
-#         )
-#
-#     degree2 = list(network.nodes[id_col].loc[network.nodes.degree == 2])
-#     d2_set = set(degree2)
-#     edge_paths = []
-#
-#     while d2_set:
-#         if len(d2_set) % 1000 == 0:
-#             print(len(d2_set))
-#         popped_node = d2_set.pop()
-#         node_path = set([popped_node])
-#         candidates = set([popped_node])
-#         while candidates:
-#             popped_cand = candidates.pop()
-#             matches = set(
-#                 np.unique(
-#                     network.edges[["from_id", "to_id"]]
-#                     .loc[
-#                         (network.edges.from_id == popped_cand)
-#                         | (network.edges.to_id == popped_cand)
-#                         ]
-#                     .values
-#                 )
-#             )
-#             matches.remove(popped_cand)
-#             matches = matches - node_path
-#             for match in matches:
-#                 if match in degree2:
-#                     candidates.add(match)
-#                     node_path.add(match)
-#                     d2_set.remove(match)
-#                 else:
-#                     node_path.add(match)
-#         if len(node_path) > 2:
-#             edge_paths.append(
-#                 network.edges.loc[
-#                     (network.edges.from_id.isin(node_path))
-#                     & (network.edges.to_id.isin(node_path))
-#                     ]
-#             )
-#
-#     concat_edge_paths = []
-#     unique_edge_ids = set()
-#     new_node_ids = set(network.nodes[id_col]) - set(degree2)
-#
-#     for edge_path in tqdm(edge_paths, desc="merge_edge_paths"):
-#         unique_edge_ids.update(list(edge_path[id_col]))
-#         edge_path = edge_path.dissolve(by=by, aggfunc=aggfunc)
-#         edge_path_dicts = []
-#         for edge in edge_path.itertuples(index=False):
-#             if edge.geometry.geom_type == "MultiLineString":
-#                 edge_geom = linemerge(edge.geometry)
-#                 if edge_geom.geom_type == "MultiLineString":
-#                     edge_geoms = list(edge_geom.geoms)
-#                 else:
-#                     edge_geoms = [edge_geom]
-#             else:
-#                 edge_geoms = [edge.geometry]
-#             for geom in edge_geoms:
-#                 start, end = line_endpoints(geom)
-#                 start = nearest_node(start, network.nodes)
-#                 end = nearest_node(end, network.nodes)
-#                 edge_path_dict = {
-#                     "from_id": start[id_col],
-#                     "to_id": end[id_col],
-#                     "geometry": geom,
-#                 }
-#                 for i, col in enumerate(edge_path.columns):
-#                     if col not in ("from_id", "to_id", "geometry"):
-#                         edge_path_dict[col] = edge[i]
-#                 edge_path_dicts.append(edge_path_dict)
-#
-#         concat_edge_paths.append(geopandas.GeoDataFrame(edge_path_dicts))
-#         new_node_ids.update(list(edge_path.from_id) + list(edge_path.to_id))
-#
-#     edges_new = network.edges.copy()
-#     edges_new = edges_new.loc[~(edges_new.id.isin(list(unique_edge_ids)))]
-#     edges_new.geometry = edges_new.geometry.apply(merge_multilinestring)
-#     edges = pd.concat(
-#         [edges_new, pd.concat(concat_edge_paths).reset_index()], sort=False
-#     ).applymap(lambda x: None if pd.isna(x) else x)
-#
-#     nodes = network.nodes.set_index(id_col).loc[list(new_node_ids)].copy().reset_index()
-#
-#     return Network(nodes=nodes, edges=edges)
+def _get_edge_paths(node_set: set, net: snkit.network.Network) -> list:
+    edge_paths = []
+
+    while node_set:
+        if len(node_set) % 1000 == 0:
+            print(len(node_set))
+        popped_node = node_set.pop()
+        node_path = set([popped_node])
+        candidates = set([popped_node])
+        while candidates:
+            popped_cand = candidates.pop()
+            matches = set(
+                np.unique(
+                    net.edges[["from_id", "to_id"]]
+                    .loc[
+                        (net.edges.from_id == popped_cand)
+                        | (net.edges.to_id == popped_cand)
+                        ]
+                    .values
+                )
+            )
+            matches.remove(popped_cand)
+            matches = matches - node_path
+            for match in matches:
+                if match in node_set:
+                    candidates.add(match)
+                    node_path.add(match)
+                    node_set.remove(match)
+                else:
+                    node_path.add(match)
+        if len(node_path) > 2:
+            edge_paths.append(
+                net.edges.loc[
+                    (net.edges.from_id.isin(node_path))
+                    & (net.edges.to_id.isin(node_path))
+                    ]
+            )
+    return edge_paths
+
 
 def _exclude_edge_types(net: snkit.network.Network, ex_edge_types: list):
     degree_2_nodes = net.nodes[net.nodes['degree'] == 2]

@@ -92,7 +92,5 @@ complex_rail_network = get_rail_network_with_terminals(network_gdf=rail_track_gd
 simplified_rail_network = simplify_rail(network=complex_rail_network)
 a = 1
 
-#  ToDo: simplify railway network, around the yard/emplacement area
-
-#  ToDo: make sure the attributes merge correctly.
-#  ToDo: Update the Jupyter notebook and check the results: adding demand links and etc.
+#  ToDo: simplify railway network, two or more parallel tracks to one (e.g., around the yard/emplacement area)
+#  ToDo: Update the Jupyter notebook per new functionality.
