@@ -1,10 +1,13 @@
+import pickle
+
+import triangle as tr
+from geopandas import GeoSeries
 from networkx import MultiDiGraph, Graph
-from shapely import Geometry, Polygon, MultiPolygon
-from shapely.ops import cascaded_union, triangulate
+from pandas import Index
+from shapely import Polygon, MultiPolygon
 from typing import Union, List
 
 import geopandas as gpd
-import numpy as np
 import pandas as pd
 import snkit.network
 
@@ -269,15 +272,15 @@ def _find_hanging_nodes(network: snkit.network.Network) -> np.ndarray:
     return np.where(deg == 1)[0]
 
 
-def _calculate_degree(network: snkit.network.Network) -> np.ndarray:
+def _calculate_degree(net: snkit.network.Network) -> np.ndarray:
     # Get the maximum node ID from both 'from_id' and 'to_id' arrays
-    max_node_id = int(max(max(network.edges['from_id']), max(network.edges['to_id'])))
+    max_node_id = int(max(max(net.edges['from_id']), max(net.edges['to_id'])))
     # Initialize a weights array to count the degrees for each node
     degrees = np.zeros(max_node_id + 1)
     # Calculate the degree for the 'from_id' array and add it to degrees
-    np.add.at(degrees, network.edges['from_id'], 1)
+    np.add.at(degrees, net.edges['from_id'], 1)
     # Calculate the degree for the 'to_id' array and add it to degrees
-    np.add.at(degrees, network.edges['to_id'], 1)
+    np.add.at(degrees, net.edges['to_id'], 1)
 
     return degrees
 
@@ -324,105 +327,180 @@ def _merge_edges(network: snkit.network.Network, excluded_edge_types: List[str])
 
     network = merge_edges_modified(network, by=excluded_edge_types, aggfunc=aggfunc)
     # update teh degree column with normal values
-    network = _get_nodes_degree(network)
     return network
 
 
 def _get_nodes_degree(network: snkit.network.Network) -> snkit.network.Network:
     degrees = _calculate_degree(network)
     node_degrees_dict = {node_id: degree for node_id, degree in enumerate(degrees) if degree > 0}
-    network.nodes['degree'] = network.nodes['id'].map(node_degrees_dict)
+    network.nodes['degree'] = network.nodes.apply(lambda node: node_degrees_dict[node['id']], axis=1)
     return network
 
 
-def _get_new_path_to_group_info(id_column: str, new_node_ids: set, paths_to_group: list, by: list,
-                                aggfunc: Union[str, dict], net: snkit.network.Network) -> tuple:
-    concat_edge_paths = []
-    unique_edge_ids = set()
+def _get_merged_edges(paths_to_group: list, by: list,
+                      aggfunc: Union[str, dict], net: snkit.network.Network) -> GeoDataFrame:
+    updated_edges = gpd.GeoDataFrame(columns=net.edges.columns, crs=net.edges.crs)  # merged edges
 
     for edge_path in tqdm(paths_to_group, desc="merge_edge_paths"):
-        unique_edge_ids.update(list(edge_path[id_column]))
-
         # Convert None values to a placeholder value
         placeholder = "None"
         for col in by:
             edge_path[col] = edge_path[col].fillna(placeholder)
+        merged_edges = _get_merge_edge_paths(edge_path, by, aggfunc, net)
+        updated_edges = pd.concat([updated_edges, merged_edges], ignore_index=True)
 
-        # Perform dissolve operation
-        edge_path = edge_path.dissolve(by=by, aggfunc=aggfunc, sort=False)
+    return updated_edges
 
-        # Replace the placeholder value back to None
-        edge_path.replace(placeholder, None, inplace=True)
 
-        edge_path_dicts = []
-        by_indices = [edge_path.columns.get_loc(col) for col in by]
+def _get_merge_edge_paths(edges: GeoDataFrame, excluded_edge_types: list, aggfunc: Union[str, dict],
+                          net: snkit.network.Network) -> GeoDataFrame:
+    def _get_sub_path_parts(ids: Index) -> list:
+        sub_path_parts = []
+        edge_group = edges.loc[ids.tolist()]  # loc finds the elements based on the index numbers
+        edge_group['intersections'] = edge_group.apply(lambda x: _get_intersections(x, edges), axis=1)
+        for edge in edge_group.itertuples(index=False):
+            sub_path_part = [edge.id]  # list of edge.id  #
+            for other_edge in edge_group.itertuples(index=False):
+                if edge.id != other_edge.id:
+                    if len(set(edge.intersections) & set(other_edge.intersections)) > 0:
+                        sub_path_part.append(other_edge.id)
+            sub_path_parts.append(sorted(sub_path_part))
+        return sub_path_parts
 
-        for edge in edge_path.itertuples(index=False):
-            group_by_values_dict = {}
+    def _get_unified_unified_sub_paths(_sub_path_parts: list) -> list:
+        _unified_sub_paths = []  # list of a group's edge.id that should be merged considering the to-exclude columns
+        for i, sub_path_part in enumerate(_sub_path_parts):
+            for j, other_sub_path_part in enumerate(_sub_path_parts):
+                if i <= j and len(set(sub_path_part) & set(other_sub_path_part)) > 0:  # find the connected edges
+                    union = sorted(set(sub_path_part + other_sub_path_part))
+                    _unified_sub_paths = _merge_element_in_a_list(set(union), _unified_sub_paths)
+                elif i <= j and len(set(sub_path_part) & set(other_sub_path_part)) == 0:
+                    if set(sub_path_part) not in _unified_sub_paths:
+                        _unified_sub_paths = _merge_element_in_a_list(set(sub_path_part), _unified_sub_paths)
+        return _unified_sub_paths
 
-            for col, col_index in zip(by, by_indices):
-                group_by_values_dict[col] = edge[col_index]
+    def _merge_element_in_a_list(element_of_concern: set, a_list: list[set]) -> list:
+        considered = []
+        for element in a_list:
+            if element_of_concern != element and len(element_of_concern & element) > 0:
+                union = set(sorted(list(element_of_concern) + list(element)))
+                if union not in a_list:
+                    a_list.append(set(sorted(list(element_of_concern) + list(element))))
+                if element != union:
+                    del a_list[a_list.index(element)]
+                considered.append(element_of_concern)
+        if element_of_concern not in considered and element_of_concern not in a_list:
+            a_list.append(element_of_concern)
+        return a_list
 
-            if edge.geometry.geom_type == "MultiLineString":
-                edge_geom = linemerge(edge.geometry)
-                if edge_geom.geom_type == "MultiLineString":
-                    edge_geoms = list(edge_geom.geoms)
-                else:
-                    edge_geoms = [edge_geom]
+    def _get_paths_to_merge(groups: dict) -> list:
+        _paths_to_merge = []  # list of gpds to merge
+        for _, edge_group_ids in groups.items():
+            sub_path_parts = _get_sub_path_parts(edge_group_ids)
+            unified_sub_paths = _get_unified_unified_sub_paths(sub_path_parts)
+            _paths_to_merge.extend(unified_sub_paths)
+            _paths_to_merge = sorted([list(sorted(i)) for i in _paths_to_merge])
+        return _paths_to_merge
+
+    def _merge(gdf: GeoDataFrame, by: list, _aggfunc: dict, ntw: snkit.network.Network) -> GeoDataFrame:
+        gdf['intersections'] = gdf.apply(lambda x: _get_intersections(x, gdf), axis=1)
+        _merged = gdf.dissolve(by=by, aggfunc=_aggfunc, sort=False)
+        merged_id = _merged['id']  # the edge id of the merged edge
+        if len(gdf) == 1:
+            start_path_extremity = gdf.iloc[0]['from_id']
+            end_path_extremity = gdf.iloc[0]['to_id']
+        else:
+            # pick one with one intersection point
+            if len(gdf[gdf['intersections'].apply(lambda x: len(x) == 1)]) == 0:  # a loop with two nodes degree > 2
+                gdf_node_ids = list(set(gdf.from_id.tolist() + gdf.to_id.tolist()))
+                gdf_node_slice = ntw.nodes[ntw.nodes['id'].isin(gdf_node_ids)]
+                if len(gdf_node_slice[gdf_node_slice['degree'] > 2]) != 2:
+                    # If there is only one node or more than 2 nodes with a degree 2
+                    return gdf
+                start_path_extremity = gdf_node_slice[gdf_node_slice['degree'] > 2].iloc[0]
+                end_path_extremity = gdf_node_slice[gdf_node_slice['degree'] > 2].iloc[1]
             else:
-                edge_geoms = [edge.geometry]
+                # Check node degrees here...
+                start_edge = gdf[gdf['intersections'].apply(lambda x: len(x) == 1)].iloc[0]
 
-            for geom in edge_geoms:
-                start, end = line_endpoints(geom)
-                start = nearest_node(start, net.nodes)
-                end = nearest_node(end, net.nodes)
-                edge_path_dict = {
-                    "from_id": start[id_column],
-                    "to_id": end[id_column],
-                    "geometry": geom,
-                }
-                for col in by:
-                    edge_path_dict[col] = group_by_values_dict[col]
+                path_extremities_node_ids = {i for i in set(gdf.from_id.tolist() + gdf.to_id.tolist())
+                                             if (gdf.from_id.tolist() + gdf.to_id.tolist()).count(i) == 1}
+                start_path_extremity = start_edge['from_id'] if start_edge['from_id'] in path_extremities_node_ids \
+                    else start_edge['to_id']
+                end_path_extremity = (path_extremities_node_ids - {start_path_extremity}).pop()
+            merged_id = 'to_be_updated'  # the edge id of the merged edge will be updated later
+        _merged.from_id = start_path_extremity
+        _merged.to_id = end_path_extremity
+        _merged.id = merged_id
+        _merged.crs = gdf.crs
+        return _merged
 
-                for i, col in enumerate(edge_path.columns):
-                    if col not in ("from_id", "to_id", "geometry") and col not in by:
-                        edge_path_dict[col] = edge[i]
+    grouped_edges = edges.groupby(excluded_edge_types)
+    if len(grouped_edges.groups) == 1:
+        merged_edges = _merge(gdf=edges, by=excluded_edge_types, _aggfunc=aggfunc, ntw=net)
+    else:
+        merged_edges = gpd.GeoDataFrame(columns=edges.columns, crs=edges.crs)  # merged edges
+        edge_groups = edges.groupby(excluded_edge_types).groups
+        paths_to_merge = _get_paths_to_merge(edge_groups)
 
-                edge_path_dicts.append(edge_path_dict)
+        for path_indices in paths_to_merge:
+            path_to_merge = edges[edges['id'].isin(path_indices)].copy()  # indices of the edges in edges gdf
+            merged = _merge(gdf=path_to_merge, by=excluded_edge_types, _aggfunc=aggfunc, ntw=net)
+            merged_edges = pd.concat([merged_edges, merged], ignore_index=True)
 
-        concat_edge_paths.append(geopandas.GeoDataFrame(edge_path_dicts))
-        new_node_ids.update(list(edge_path.from_id) + list(edge_path.to_id))
-    return new_node_ids, unique_edge_ids, concat_edge_paths
+        merged_edges.crs = edges.crs
+
+    return merged_edges
 
 
-def merge_edges_modified(network: snkit.network.Network, aggfunc: Union[str, dict], by: Union[str, list],
+def _get_intersections(_edge: GeoSeries, _edges: GeoDataFrame) -> list:
+    intersections = []
+    for other_edge in _edges.itertuples(index=False):
+        if _edge.id != other_edge.id:  # avoid self-intersection
+            intersection = _edge.geometry.intersection(other_edge.geometry)
+            if not intersection.is_empty:
+                if isinstance(intersection, MultiPoint):
+                    intersections.extend([point.coords[0] for point in intersection.geoms if
+                                          point in other_edge.geometry.boundary.geoms])
+                else:
+                    intersections.append(intersection.coords[0])
+    return sorted(intersections, key=lambda x: x[0])
+
+
+def merge_edges_modified(net: snkit.network.Network, aggfunc: Union[str, dict], by: Union[str, list],
                          id_col="id") -> snkit.network.Network:
-    if "degree" not in network.nodes.columns:
-        network.nodes["degree"] = network.nodes[id_col].apply(
-            lambda x: node_connectivity_degree(x, network)
+    def _get_edge_ids_to_update(edges_list: list) -> list:
+        ids_to_update = []
+        for edges in edges_list:
+            ids_to_update.extend(edges.id.tolist())
+        return ids_to_update
+
+    if "degree" not in net.nodes.columns:
+        net.nodes["degree"] = net.nodes[id_col].apply(
+            lambda x: node_connectivity_degree(x, net)
         )
 
-    degree_2 = list(network.nodes[id_col].loc[network.nodes.degree == 2])
+    degree_2 = list(net.nodes[id_col].loc[net.nodes.degree == 2])
     degree_2_set = set(degree_2)
-    edge_paths = _get_edge_paths(degree_2_set, network)
+    edge_paths = _get_edge_paths(degree_2_set, net)
 
-    new_node_ids = set(network.nodes[id_col]) - set(degree_2)
-    new_node_ids, unique_edge_ids, concat_edge_paths = _get_new_path_to_group_info(id_column=id_col,
-                                                                                   new_node_ids=new_node_ids,
-                                                                                   paths_to_group=edge_paths,
-                                                                                   by=by,
-                                                                                   aggfunc=aggfunc,
-                                                                                   net=network)
-    edges_new = network.edges.copy()
-    edges_new = edges_new.loc[~(edges_new.id.isin(list(unique_edge_ids)))]
-    edges_new.geometry = edges_new.geometry.apply(merge_multilinestring)
-    edges = pd.concat(
-        [edges_new, pd.concat(concat_edge_paths).reset_index(drop=True)], sort=False
-    ).applymap(lambda x: None if pd.isna(x) or x == '' else x)
+    # updated_node_ids = set(net.nodes[id_col]) - set(degree_2)
 
-    nodes = network.nodes.set_index(id_col).loc[list(new_node_ids)].copy().reset_index()
+    edge_ids_to_update = _get_edge_ids_to_update(edge_paths)
+    edges_to_keep = net.edges[~net.edges['id'].isin(edge_ids_to_update)]
 
-    return Network(nodes=nodes, edges=edges)
+    updated_edges = _get_merged_edges(paths_to_group=edge_paths, by=by, aggfunc=aggfunc, net=net)
+    updated_edges.id = range(len(updated_edges))
+    updated_edges = updated_edges.reset_index(drop=True)
+
+    new_edges = pd.concat([edges_to_keep, updated_edges], ignore_index=True)
+    new_edges = new_edges.reset_index(drop=True)
+
+    nodes_to_keep = list(set(new_edges.from_id.tolist() + new_edges.to_id.tolist()))
+    new_nodes = net.nodes[net.nodes[id_col].isin(nodes_to_keep)]
+    new_nodes = new_nodes.reset_index(drop=True)
+
+    return Network(nodes=new_nodes, edges=new_edges)
 
 
 def _get_edge_paths(node_set: set, net: snkit.network.Network) -> list:
@@ -432,8 +510,8 @@ def _get_edge_paths(node_set: set, net: snkit.network.Network) -> list:
         if len(node_set) % 1000 == 0:
             print(len(node_set))
         popped_node = node_set.pop()
-        node_path = set([popped_node])
-        candidates = set([popped_node])
+        node_path = {popped_node}
+        candidates = {popped_node}
         while candidates:
             popped_cand = candidates.pop()
             matches = set(
@@ -465,95 +543,222 @@ def _get_edge_paths(node_set: set, net: snkit.network.Network) -> list:
     return edge_paths
 
 
-def _simplify_tracks(net: snkit.network.Network, buffer_distance: float, hole_threshold: float) -> \
+def _simplify_tracks(net: snkit.network.Network, buffer_distance: float, hole_area_threshold: float) -> \
         snkit.network.Network:
+    net = _drop_hanging_nodes(net)
     unified_buffer_gdf = _unified_buffer_tracks(net, buffer_distance)
-    clean_unified_buffer = _remove_small_holes(unified_buffer_gdf, hole_threshold)
-    triangles = _triangulate_polygon(clean_unified_buffer)
-    triangle_gdf = _create_triangle_gdf(triangles, clean_unified_buffer)
+    unified_buffer_gdf = get_largest_polygon(unified_buffer_gdf)
+    unified_buffer_gdf = _remove_small_holes(unified_buffer_gdf, hole_area_threshold)
+    triangulation_data = _triangulate_polygon(unified_buffer_gdf)
+    # with open(r'C:\Users\asgarpou\osm\networks\triangulation_data.pickle', 'wb') as handle:
+    #     pickle.dump(triangulation_data, handle)
+    triangles_gdf = _create_triangle_gdf(triangulation_data, unified_buffer_gdf)
     return net
+
+
+def _drop_hanging_nodes(net, tolerance=0.005):
+    """
+    from trail
+
+    This method drops any single degree nodes and their associated edges given a
+    distance(degrees) threshold. This primarily happens when a road was connected to residential
+    areas, most often these are link roads that no longer do so.
+
+    Args:
+        net (class): A network composed of nodes (points in space) and edges (lines)
+        tolerance (float, optional): The maximum allowed distance from hanging nodes to the network. Defaults to 0.005.
+
+    Returns:
+        network (class): A network composed of nodes (points in space) and edges (lines)
+
+    """
+    # if 'degree' not in net.nodes.columns:
+    #     deg = _calculate_degree(net)
+    # else:
+    #     deg = net.nodes['degree'].to_numpy()
+    net = _get_nodes_degree(net)
+    deg = net.nodes['degree'].to_numpy()
+    # hangNodes : An array of the indices of nodes with degree 1
+    hangNodes = np.where(deg == 1)
+    ed = net.edges.copy()
+    to_ids = ed['to_id'].to_numpy()
+    from_ids = ed['from_id'].to_numpy()
+    hangTo = np.isin(to_ids, hangNodes)
+    hangFrom = np.isin(from_ids, hangNodes)
+    # eInd : An array containing the indices of edges that connect the degree 1 nodes
+    eInd = np.hstack((np.nonzero(hangTo), np.nonzero(hangFrom)))
+    degEd = ed.iloc[np.sort(eInd[0])]
+    edge_id_drop = []
+    for d in degEd.itertuples():
+        dist = shapely.measurement.length(d.geometry)
+        # If the edge is shorter than the tolerance
+        # add the ID to the drop list and update involved node degrees
+        if dist < tolerance and d.demand_edge != 1:
+            edge_id_drop.append(d.id)
+            deg[d.from_id] -= 1
+            deg[d.to_id] -= 1
+        # drops disconnected edges, some may still persist since we have not merged yet
+        if deg[d.from_id] == 1 and deg[d.to_id] == 1 and d.demand_edge != 1:
+            edge_id_drop.append(d.id)
+            deg[d.from_id] -= 1
+            deg[d.to_id] -= 1
+
+    edg = ed.loc[~(ed.id.isin(edge_id_drop))].reset_index(drop=True)
+    edg.drop(labels=['id'], axis=1, inplace=True)
+    edg['id'] = range(len(edg))
+    n = net.nodes.copy()
+    n['degree'] = deg
+    return Network(nodes=n, edges=edg)
 
 
 def _unified_buffer_tracks(net: snkit.network.Network, buffer_distance_km: float) -> GeoDataFrame:
     buffer_distance_deg = _km_distance_to_degrees(buffer_distance_km)
-    buffered_data = net.edges.geometry.buffer(buffer_distance_deg)
-    data = [{'id': 1, 'geom': unary_union(buffered_data)}]
-    buffered_gdf = gpd.GeoDataFrame(data, geometry='geom', crs='EPSG:4326')
+    buffered_data = net.edges.set_crs(net.nodes.crs).geometry.buffer(distance=buffer_distance_deg, cap_style='square')
+    data = [{'id': 1, 'geometry': unary_union(buffered_data)}]
+    buffered_gdf = gpd.GeoDataFrame(data, geometry='geometry', crs=net.nodes.crs)
     return buffered_gdf
 
 
-def _remove_small_holes(input_poly_gdf: GeoDataFrame, hole_threshold: float) \
+def get_largest_polygon(input_poly_gdf: GeoDataFrame) -> GeoDataFrame:
+    largest_polygon = None
+    max_area = 0.0
+
+    for polygon in input_poly_gdf.loc[0, 'geometry'].geoms:
+        area = polygon.area
+        if area > max_area:
+            max_area = area
+            largest_polygon = polygon
+
+    return gpd.GeoDataFrame({'id': [1], 'geometry': MultiPolygon([largest_polygon])},
+                            geometry='geometry', crs='EPSG:4326')
+
+
+def _remove_small_holes(input_poly_gdf: GeoDataFrame, hole_area_threshold: float) \
         -> GeoDataFrame:
     """
     Remove small holes from a buffered polygon that are smaller than the specified threshold.
     """
-    cleaned_polygons = []
-    unified_polygon_geom = input_poly_gdf.loc[0, 'geom']
-    if isinstance(unified_polygon_geom, MultiPolygon):
-        for polygon in unified_polygon_geom.geoms:
-            cleaned_polygon = _clean_single_polygon(polygon, hole_threshold)
-            if cleaned_polygon:
-                cleaned_polygons.append(cleaned_polygon)
-    else:
-        cleaned_polygon = _clean_single_polygon(unified_polygon_geom, hole_threshold)
-        if cleaned_polygon:
-            cleaned_polygons.append(cleaned_polygon)
 
-    data = [{'id': 1, 'geom': unary_union(cleaned_polygons)}]
-    cleaned_union_buffer_gdf = gpd.GeoDataFrame(data, geometry='geom', crs='EPSG:4326')
-    return cleaned_union_buffer_gdf
-
-
-def _clean_single_polygon(polygon, hole_threshold):
     def _km_area_to_degrees(area_km: float):
         return area_km * 1 / 111.32 * 1 / 111.32
 
-    hole_threshold_degree = _km_area_to_degrees(hole_threshold)
-    if polygon.area < hole_threshold_degree:
-        return None
+    if isinstance(input_poly_gdf.loc[0, 'geometry'], Polygon):
+        raise NotImplementedError("Not implemented yet")
 
-    holes = [hole for hole in polygon.interiors if hole.area >= hole_threshold_degree]
-    return Polygon(polygon.exterior, holes) if holes else polygon
+    list_interiors = []
+    new_polygons = []
+    hole_threshold_degree = _km_area_to_degrees(hole_area_threshold)
+
+    multi_polygon = input_poly_gdf.loc[0, 'geometry']
+    for polygon in multi_polygon.geoms:
+        for interior in polygon.interiors:
+            p = Polygon(interior)
+            if p.area > hole_threshold_degree:
+                list_interiors.append(interior)
+
+        new_polygons.append(Polygon(polygon.exterior.coords, holes=list_interiors))
+    return gpd.GeoDataFrame({'geometry': [MultiPolygon([new_polygon for new_polygon in new_polygons])]},
+                            geometry='geometry', crs=input_poly_gdf.crs)
 
 
-def _triangulate_polygon(poly_gdf: GeoDataFrame) -> list[Polygon]:
+def _triangulate_polygon(poly_gdf: gpd.GeoDataFrame) -> dict:
     """
     Triangulate a polygon using constrained Delaunay triangulation.
     """
-    poly_geom = poly_gdf.loc[0, 'geom']
-    triangles = []
+    poly_geom = poly_gdf.loc[0, 'geometry']
+    _triangles = []
+    _triangulation_data = {}
+
     if isinstance(poly_geom, MultiPolygon):
         for p in poly_geom.geoms:
-            triangles.extend(triangulate(p))
+            triangulation = _triangulation(p)
+            new_triangulation_data = _filter_triangles(p, triangulation)
+            _triangulation_data = _update_dict(_triangulation_data, new_triangulation_data)
     else:
-        triangles.extend(triangulate(poly_geom))
-    return triangles
+        triangulation = _triangulation(poly_geom)
+        new_triangulation_data = _filter_triangles(poly_geom, triangulation)
+        _triangulation_data = _update_dict(_triangulation_data, new_triangulation_data)
+
+    return _triangulation_data
 
 
-def _create_triangle_gdf(triangles: list, polygon_boundary: GeoDataFrame) -> GeoDataFrame:
-    def create_triangle_row(idx: int, triangle: Polygon) -> dict:
-        triangle_type = _detect_triangle_type(triangle, polygon_boundary.loc[0, 'geom'].exterior)
+def _triangulation(polygon: Polygon) -> dict:
+    """
+    Triangulate a single polygon using constrained Delaunay triangulation.
+    """
+    boundary = polygon.boundary
+    coords = []
+    _triangle_geoms = []
+    if isinstance(boundary, LineString):
+        coords = list(boundary.coords)
+    [coords.extend(list(b.coords)) for b in boundary.geoms]
+    segments = [(i, i + 1) for i in range(len(coords) - 1)]
+    segments.append((len(coords) - 1, 0))  # Close the polygon
 
+    return tr.triangulate({'vertices': coords, 'segments': segments})
+
+
+def _update_dict(existing_dict: dict, new_dict: dict) -> dict:
+    updated_dict = existing_dict
+    for key, new_value in new_dict.items():
+        if key in updated_dict:
+            updated_dict[key].extend(new_value)
+        else:
+            updated_dict[key] = new_value
+    return updated_dict
+
+
+def _filter_triangles(polygon: Union[Polygon, MultiPolygon], triangulation_result: dict) -> dict:
+    # Filter on the triangles to exclude the external and holes' triangles
+    _triangles = []
+    _sides = []
+    _triangle_types = []
+
+    for _, tri in enumerate(triangulation_result['triangles']):
+        _tri_coords = [triangulation_result['vertices'][vertex_id] for vertex_id in tri]
+        _tri_sides = [LineString([_tri_coords[i], _tri_coords[(i + 1) % 3]]) for i, vertex_id in enumerate(tri)]
+
+        edge_polygon_intersections = {edge.intersection(polygon) for edge in _tri_sides}
+        sum_edges_touching_triangulated_boundary = sum(isinstance(edge_polygon_intersection, (Point, MultiPoint)) for
+                                                       edge_polygon_intersection in edge_polygon_intersections)
+        sum_edges_within_polygon = sum(polygon.contains(edge_polygon_intersection)
+                                       for edge_polygon_intersection in edge_polygon_intersections)
+        if sum_edges_touching_triangulated_boundary >= 2 and sum_edges_within_polygon == 0:
+            continue
+        elif sum_edges_touching_triangulated_boundary != 3 and (3 > sum_edges_within_polygon > 0):
+            _triangle_types.append("normal")
+        elif sum_edges_touching_triangulated_boundary == 1 and sum_edges_within_polygon == 0:
+            _triangle_types.append("normal")
+        elif sum_edges_touching_triangulated_boundary == 0 and \
+                (sum_edges_within_polygon == 3 or sum_edges_within_polygon == 0):
+            _triangle_types.append("interior")
+
+        _triangles.append(Polygon(_tri_coords))
+        _sides.append(_tri_sides)
+
+    return {
+        "triangle_geometries": _triangles,
+        "sides": _sides,
+        "triangle_types": _triangle_types,
+    }
+
+
+def _create_triangle_gdf(_triangulation_data: dict, polygon: GeoDataFrame) -> GeoDataFrame:
+    def create_triangle_row(idx: int, triangle: Polygon, _triangulation_data: dict) -> dict:
         return {
             'id': idx,
-            'geom': Polygon(triangle),
+            'geometry': triangle,
             'track_edges_geom': [],
-            'type': triangle_type,
+            'type': _triangulation_data["triangle_types"][idx],
             'constellation_type': ''
         }
 
-    triangles.sort(key=lambda tri: tri.centroid.coords[0])
-    rows = (create_triangle_row(idx, triangle) for idx, triangle in enumerate(triangles))
+    rows = (create_triangle_row(idx, triangle, _triangulation_data) for idx, triangle in
+            enumerate(_triangulation_data['triangle_geometries']))
     triangle_gdf = gpd.GeoDataFrame.from_records(rows)
+    triangle_gdf = triangle_gdf.set_geometry('geometry')
+    triangle_gdf = triangle_gdf.set_crs(polygon.crs)
     return triangle_gdf
-
-
-def _detect_triangle_type(triangle: Polygon, polygon_boundary: Union[Polygon, MultiPolygon]):
-    sides = map(lambda i: LineString([triangle.exterior.coords[i], triangle.exterior.coords[(i + 1) % 3]]), range(3))
-    if any(side.intersects(polygon_boundary) for side in sides):
-        return 'normal'
-    else:
-        return 'interior'
 
 
 # def trace_track_edges(triangles: list, net: snkit.network.Network) -> snkit.network.Network:
@@ -580,7 +785,12 @@ def _identify_intersected_track_edges(triangle: list, net: snkit.network.Network
     return affected_track_edges
 
 
-def cut_track_edges_at_triangle_sides(track_edge, triangle):
-    # Cut the track_edge at the edges of the triangle
-    cut_track = track_edge.geometry.intersection(Polygon(triangle))
-    return cut_track
+def cut_track_edges_at_triangle_sides(track_edges: GeoDataFrame, triangulation_data: dict):
+    cut_track_edges = []
+    for tri in triangulation_data['triangles']:
+        cut_result = gpd.overlay(track_edges, gpd.GeoDataFrame(geometry=[tri]), how='intersection')
+        cut_track_edges.append(cut_result)
+
+    cut_edges_gdf = gpd.GeoDataFrame(pd.concat(cut_track_edges, ignore_index=True))
+
+    return cut_track_edges
