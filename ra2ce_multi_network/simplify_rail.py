@@ -1,3 +1,4 @@
+import math
 import pickle
 
 import triangle as tr
@@ -278,10 +279,11 @@ def _calculate_degree(net: snkit.network.Network) -> np.ndarray:
     # Initialize a weights array to count the degrees for each node
     degrees = np.zeros(max_node_id + 1)
     # Calculate the degree for the 'from_id' array and add it to degrees
-    np.add.at(degrees, net.edges['from_id'], 1)
+    from_ids = net.edges['from_id'].to_numpy(dtype=np.int64)
+    np.add.at(degrees, from_ids, 1)
     # Calculate the degree for the 'to_id' array and add it to degrees
-    np.add.at(degrees, net.edges['to_id'], 1)
-
+    to_id = net.edges['to_id'].to_numpy(dtype=np.int64)
+    np.add.at(degrees, to_id, 1)
     return degrees
 
 
@@ -417,8 +419,8 @@ def _get_merge_edge_paths(edges: GeoDataFrame, excluded_edge_types: list, aggfun
                 if len(gdf_node_slice[gdf_node_slice['degree'] > 2]) != 2:
                     # If there is only one node or more than 2 nodes with a degree 2
                     return gdf
-                start_path_extremity = gdf_node_slice[gdf_node_slice['degree'] > 2].iloc[0]
-                end_path_extremity = gdf_node_slice[gdf_node_slice['degree'] > 2].iloc[1]
+                start_path_extremity = gdf_node_slice[gdf_node_slice['degree'] > 2].iloc[0].id
+                end_path_extremity = gdf_node_slice[gdf_node_slice['degree'] > 2].iloc[1].id
             else:
                 # Check node degrees here...
                 start_edge = gdf[gdf['intersections'].apply(lambda x: len(x) == 1)].iloc[0]
@@ -483,8 +485,6 @@ def merge_edges_modified(net: snkit.network.Network, aggfunc: Union[str, dict], 
     degree_2 = list(net.nodes[id_col].loc[net.nodes.degree == 2])
     degree_2_set = set(degree_2)
     edge_paths = _get_edge_paths(degree_2_set, net)
-
-    # updated_node_ids = set(net.nodes[id_col]) - set(degree_2)
 
     edge_ids_to_update = _get_edge_ids_to_update(edge_paths)
     edges_to_keep = net.edges[~net.edges['id'].isin(edge_ids_to_update)]
@@ -556,7 +556,7 @@ def _simplify_tracks(net: snkit.network.Network, buffer_distance: float, hole_ar
     return net
 
 
-def _drop_hanging_nodes(net, tolerance=0.005):
+def _drop_hanging_nodes(net, tolerance=1):
     """
     from trail
 
@@ -572,13 +572,11 @@ def _drop_hanging_nodes(net, tolerance=0.005):
         network (class): A network composed of nodes (points in space) and edges (lines)
 
     """
-    # if 'degree' not in net.nodes.columns:
-    #     deg = _calculate_degree(net)
-    # else:
-    #     deg = net.nodes['degree'].to_numpy()
     net = _get_nodes_degree(net)
     deg = net.nodes['degree'].to_numpy()
+    node_id_deg = dict(zip(net.nodes.index, net.nodes['degree']))
     # hangNodes : An array of the indices of nodes with degree 1
+
     hangNodes = np.where(deg == 1)
     ed = net.edges.copy()
     to_ids = ed['to_id'].to_numpy()
@@ -589,26 +587,31 @@ def _drop_hanging_nodes(net, tolerance=0.005):
     eInd = np.hstack((np.nonzero(hangTo), np.nonzero(hangFrom)))
     degEd = ed.iloc[np.sort(eInd[0])]
     edge_id_drop = []
+
     for d in degEd.itertuples():
         dist = shapely.measurement.length(d.geometry)
         # If the edge is shorter than the tolerance
         # add the ID to the drop list and update involved node degrees
         if dist < tolerance and d.demand_edge != 1:
             edge_id_drop.append(d.id)
-            deg[d.from_id] -= 1
-            deg[d.to_id] -= 1
+            deg[(net.nodes['id'] == d.from_id).idxmax()] -= 1
+            deg[(net.nodes['id'] == d.to_id).idxmax()] -= 1
         # drops disconnected edges, some may still persist since we have not merged yet
-        if deg[d.from_id] == 1 and deg[d.to_id] == 1 and d.demand_edge != 1:
+        if deg[(net.nodes['id'] == d.from_id).idxmax()] == 1 and deg[(net.nodes['id'] == d.to_id).idxmax()] == 1 and\
+                d.demand_edge != 1:
             edge_id_drop.append(d.id)
-            deg[d.from_id] -= 1
-            deg[d.to_id] -= 1
+            deg[(net.nodes['id'] == d.from_id).idxmax()] -= 1
+            deg[(net.nodes['id'] == d.to_id).idxmax()] -= 1
 
     edg = ed.loc[~(ed.id.isin(edge_id_drop))].reset_index(drop=True)
     edg.drop(labels=['id'], axis=1, inplace=True)
     edg['id'] = range(len(edg))
     n = net.nodes.copy()
-    n['degree'] = deg
-    return Network(nodes=n, edges=edg)
+    # Degree 0 Nodes are cleaned in the merge_2 method
+    nod = n.iloc[deg > 0].reset_index(drop=True)
+    nod['degree'] = deg[deg > 0]
+    # ToDo: find deg 0 s recursively and make sure they are removed. Check why deg - ?
+    return Network(nodes=nod, edges=edg)
 
 
 def _unified_buffer_tracks(net: snkit.network.Network, buffer_distance_km: float) -> GeoDataFrame:
