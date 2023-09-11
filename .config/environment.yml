@@ -1,4 +1,4 @@
-name: myenv
+name: ra2ce_multi
 channels:
   - conda-forge
   - nodefaults
