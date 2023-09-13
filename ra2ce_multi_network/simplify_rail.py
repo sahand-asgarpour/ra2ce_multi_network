@@ -698,13 +698,6 @@ def _drop_hanging_nodes(net, tolerance=1):
                 edge_id_drop.append(d.id)
                 deg[(net.nodes['id'] == d.from_id).idxmax()] -= 1
                 deg[(net.nodes['id'] == d.to_id).idxmax()] -= 1
-            # # drops disconnected edges, some may still persist since we have not merged yet
-            # if deg[(net.nodes['id'] == d.from_id).idxmax()] == 1 and deg[(net.nodes['id'] == d.to_id).idxmax()] == 1 \
-            #         and d.demand_edge != 1:
-            #     edge_id_drop.append(d.id)
-            #     deg[(net.nodes['id'] == d.from_id).idxmax()] -= 1
-            #     deg[(net.nodes['id'] == d.to_id).idxmax()] -= 1
-
         edges_copy = net.edges.copy()
         edg = edges_copy.loc[~(edges_copy.id.isin(edge_id_drop))]
         hang_nodes = np.where(deg == 1)
