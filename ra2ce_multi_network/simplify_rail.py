@@ -5,7 +5,7 @@ import triangle as tr
 from geopandas import GeoSeries
 from networkx import MultiDiGraph, Graph
 from pandas import Index
-from shapely import Polygon, MultiPolygon
+from shapely import Polygon, MultiPolygon, MultiLineString
 from typing import Union, List
 
 import geopandas as gpd
@@ -327,7 +327,7 @@ def _merge_edges(network: snkit.network.Network, excluded_edge_types: List[str])
             for col in cols
         }
 
-    network = merge_edges_modified(network, by=excluded_edge_types, aggfunc=aggfunc)
+    network = merge_edges(network, aggfunc=aggfunc, by=excluded_edge_types)
     # update teh degree column with normal values
     return network
 
@@ -335,7 +335,7 @@ def _merge_edges(network: snkit.network.Network, excluded_edge_types: List[str])
 def _get_nodes_degree(network: snkit.network.Network) -> snkit.network.Network:
     degrees = _calculate_degree(network)
     node_degrees_dict = {node_id: degree for node_id, degree in enumerate(degrees) if degree > 0}
-    network.nodes['degree'] = network.nodes.apply(lambda node: node_degrees_dict[node['id']], axis=1)
+    network.nodes['degree'] = network.nodes.apply(lambda node: node_degrees_dict[node.id], axis=1)
     return network
 
 
@@ -405,34 +405,135 @@ def _get_merge_edge_paths(edges: GeoDataFrame, excluded_edge_types: list, aggfun
         return _paths_to_merge
 
     def _merge(gdf: GeoDataFrame, by: list, _aggfunc: dict, ntw: snkit.network.Network) -> GeoDataFrame:
+        def _split(_line_geom: Union[MultiLineString, LineString], dem_nod_id: int, splits_gdf: GeoDataFrame) -> tuple:
+            dem_nod_geom = ntw.nodes[ntw.nodes.id == dem_nod_id].geometry.iloc[0]
+            if _line_geom.contains(dem_nod_geom):
+                if isinstance(_line_geom, MultiLineString):
+                    coords = [linemerge(_line_geom).coords[0],
+                              linemerge(_line_geom).coords[-1]]
+                else:
+                    coords = [_line_geom.coords[0],
+                              _line_geom.coords[-1]]
+                # Add the coords from the points
+                coords += dem_nod_geom.coords
+                # Calculate the distance along the line for each point
+                dists = [linemerge(_line_geom).project(Point(p)) for p in coords]
+                # sort the coordinates
+                coords = [p for (d, p) in sorted(zip(dists, coords))]
+                splits = [LineString([coords[i], coords[i + 1]]) for i in range(len(coords) - 1)]
+                splits_gdf = _update_slite_edges_gdf(splits, dem_nod_id, splits_gdf, _line_geom)
+                return splits, splits_gdf
+            else:
+                return None, splits_gdf
+
+        def _update_slite_edges_gdf(parts: list, dem_nod_id: int, splt_edgs: GeoDataFrame,
+                                    _split_line_geom: LineString) -> GeoDataFrame:
+            # splt_edgs = gpd.GeoDataFrame(columns=_merged.columns)
+            for part in parts:
+                # _split_line_geom is the line divided and produced parts
+                if _split_line_geom not in splt_edgs.geometry.tolist():
+                    part_gdf = gpd.GeoDataFrame({'geometry': part,
+                                                 'id': len(splt_edgs),
+                                                 'from_id': dem_nod_id,
+                                                 'to_id': -1,
+                                                 **_merged.drop(columns=['geometry', 'id', 'from_id', 'to_id'])
+                                                 })
+                else:
+                    # if _split_line_geom is divided and n stored in splt_edgs, we need to retrieve from/to_id info
+                    # and update splt_edgs
+                    part_gdf = gpd.GeoDataFrame({'geometry': part,
+                                                 'id': -1,
+                                                 'from_id': splt_edgs[
+                                                     splt_edgs.geometry == _split_line_geom].apply(
+                                                     lambda row: row.from_id
+                                                     if row.from_id != -1 else dem_nod_id, axis=1),
+                                                 'to_id': splt_edgs[
+                                                     splt_edgs.geometry == _split_line_geom].apply(
+                                                     lambda row: row.to_id
+                                                     if row.to_id != -1 else dem_nod_id, axis=1),
+                                                 **_merged.drop(columns=['geometry', 'id', 'from_id', 'to_id'])
+                                                 }
+                                                )
+                    _split_line_index = splt_edgs.loc[splt_edgs.geometry == _split_line_geom].index[0]
+                    splt_edgs = splt_edgs.drop(_split_line_index)
+                splt_edgs = pd.concat([splt_edgs, part_gdf], ignore_index=True)
+            return splt_edgs
+
+        def _get_split_edges_info(_merged: GeoDataFrame) -> tuple:
+            # make the demand node from_id of the merged edge
+            demand_node_ids = [
+                i for i in set(gdf.from_id.tolist() + gdf.to_id.tolist())
+                if (
+                           gdf[gdf.demand_edge == 1].from_id.tolist() + gdf[gdf.demand_edge == 1].to_id.tolist()
+                   ).count(i) == 2
+            ]  # list has always 1 element
+            split_parts = [_merged['geometry'].iloc[0]]
+            split_edges_gdf = gpd.GeoDataFrame(columns=_merged.columns)
+            for demand_node_id in demand_node_ids:
+                for part in split_parts:
+                    part_splits, split_edges_gdf = _split(part, demand_node_id, split_edges_gdf)
+                    if part_splits is not None:
+                        split_parts.extend(part_splits)
+                        split_parts.remove(part)
+            return split_edges_gdf
+
+        def _get_node_id(r: GeoSeries, attr: str) -> int:
+            if r[attr] == -1:
+                for path_extremities_node_id in path_extremities_node_ids:
+                    path_extremities_node_geom = ntw.nodes[ntw.nodes.id == path_extremities_node_id].geometry.iloc[0]
+                    if r.geometry.intersects(path_extremities_node_geom):
+                        return path_extremities_node_id
+            else:
+                return r[attr]
+
         gdf['intersections'] = gdf.apply(lambda x: _get_intersections(x, gdf), axis=1)
         _merged = gdf.dissolve(by=by, aggfunc=_aggfunc, sort=False)
         merged_id = _merged['id']  # the edge id of the merged edge
         if len(gdf) == 1:
-            start_path_extremity = gdf.iloc[0]['from_id']
-            end_path_extremity = gdf.iloc[0]['to_id']
+            # 1. no merging is occurring
+            start_path_extremities = [gdf.iloc[0]['from_id']]
+            end_path_extremities = [gdf.iloc[0]['to_id']]
+            _merged.from_id = start_path_extremities[0]
+            _merged.to_id = end_path_extremities[0]
         else:
-            # pick one with one intersection point
-            if len(gdf[gdf['intersections'].apply(lambda x: len(x) == 1)]) == 0:  # a loop with two nodes degree > 2
+            # 2. merging is occurring
+            if len(gdf[gdf['intersections'].apply(lambda x: len(x) == 1)]) == 0:
+                # 2.1. a loop with two nodes degree > 2
                 gdf_node_ids = list(set(gdf.from_id.tolist() + gdf.to_id.tolist()))
                 gdf_node_slice = ntw.nodes[ntw.nodes['id'].isin(gdf_node_ids)]
                 if len(gdf_node_slice[gdf_node_slice['degree'] > 2]) != 2:
-                    # If there is only one node or more than 2 nodes with a degree 2
+                    # 2.1.1. If there is only one node or more than 2 nodes with a degree 2
                     return gdf
-                start_path_extremity = gdf_node_slice[gdf_node_slice['degree'] > 2].iloc[0].id
-                end_path_extremity = gdf_node_slice[gdf_node_slice['degree'] > 2].iloc[1].id
+                # 2.1.2. pick one with one intersection point
+                start_path_extremities = [gdf_node_slice[gdf_node_slice['degree'] > 2].iloc[0].id]
+                end_path_extremities = [gdf_node_slice[gdf_node_slice['degree'] > 2].iloc[1].id]
+                _merged.from_id = [start_path_extremity for start_path_extremity in start_path_extremities]
+                _merged.to_id = [end_path_extremity for end_path_extremity in end_path_extremities]
             else:
-                # Check node degrees here...
-                start_edge = gdf[gdf['intersections'].apply(lambda x: len(x) == 1)].iloc[0]
-
+                # 2.2. merging non-loop paths
                 path_extremities_node_ids = {i for i in set(gdf.from_id.tolist() + gdf.to_id.tolist())
                                              if (gdf.from_id.tolist() + gdf.to_id.tolist()).count(i) == 1}
-                start_path_extremity = start_edge['from_id'] if start_edge['from_id'] in path_extremities_node_ids \
-                    else start_edge['to_id']
-                end_path_extremity = (path_extremities_node_ids - {start_path_extremity}).pop()
+                if len(gdf[gdf['demand_edge'] == 1]) > 1:
+                    # 2.2.1. At least one dem node with deg 2 exists in the merged_path that we want not dissolve
+                    _merged = _get_split_edges_info(_merged)  # , start_path_extremities, end_path_extremities
+                    _merged.from_id = _merged.apply(lambda row: _get_node_id(row, 'from_id'), axis=1)
+                    _merged.to_id = _merged.apply(lambda row: _get_node_id(row, 'to_id'), axis=1)
+                else:
+                    # 2.2.2. no dem node is in the to_be_merged path or only one dem node. In the later case dem node
+                    # will not be dissolved because it is in the path_extremities_node_ids
+                    start_edges = gdf[gdf['intersections'].apply(lambda x: len(x) == 1)]
+                    if len(gdf[gdf['demand_edge'] == 1]) == 1:
+                        start_edge = start_edges[start_edges.demand_edge == 1].iloc[0]
+                    else:
+                        start_edge = start_edges.iloc[0]
+                    start_path_extremities = [start_edge['from_id']
+                                              if start_edge['from_id'] in list(path_extremities_node_ids)
+                                              else start_edge['to_id']]
+                    end_path_extremities = [(path_extremities_node_ids - set(start_path_extremities)).pop()]
+                    _merged.from_id = [start_path_extremity for start_path_extremity in start_path_extremities]
+                    _merged.to_id = [end_path_extremity for end_path_extremity in end_path_extremities]
+
             merged_id = 'to_be_updated'  # the edge id of the merged edge will be updated later
-        _merged.from_id = start_path_extremity
-        _merged.to_id = end_path_extremity
         _merged.id = merged_id
         _merged.crs = gdf.crs
         return _merged
@@ -460,7 +561,8 @@ def _get_intersections(_edge: GeoSeries, _edges: GeoDataFrame) -> list:
     for other_edge in _edges.itertuples(index=False):
         if _edge.id != other_edge.id:  # avoid self-intersection
             intersection = _edge.geometry.intersection(other_edge.geometry)
-            if not intersection.is_empty:
+            if not intersection.is_empty and \
+                    any((intersection.intersects(boundary)) for boundary in _edge.geometry.boundary.geoms):
                 if isinstance(intersection, MultiPoint):
                     intersections.extend([point.coords[0] for point in intersection.geoms if
                                           point in other_edge.geometry.boundary.geoms])
@@ -469,8 +571,8 @@ def _get_intersections(_edge: GeoSeries, _edges: GeoDataFrame) -> list:
     return sorted(intersections, key=lambda x: x[0])
 
 
-def merge_edges_modified(net: snkit.network.Network, aggfunc: Union[str, dict], by: Union[str, list],
-                         id_col="id") -> snkit.network.Network:
+def merge_edges(net: snkit.network.Network, aggfunc: Union[str, dict], by: Union[str, list],
+                id_col="id") -> snkit.network.Network:
     def _get_edge_ids_to_update(edges_list: list) -> list:
         ids_to_update = []
         for edges in edges_list:
@@ -490,10 +592,10 @@ def merge_edges_modified(net: snkit.network.Network, aggfunc: Union[str, dict], 
     edges_to_keep = net.edges[~net.edges['id'].isin(edge_ids_to_update)]
 
     updated_edges = _get_merged_edges(paths_to_group=edge_paths, by=by, aggfunc=aggfunc, net=net)
-    updated_edges.id = range(len(updated_edges))
     updated_edges = updated_edges.reset_index(drop=True)
 
     new_edges = pd.concat([edges_to_keep, updated_edges], ignore_index=True)
+    new_edges.id = range(len(new_edges))
     new_edges = new_edges.reset_index(drop=True)
 
     nodes_to_keep = list(set(new_edges.from_id.tolist() + new_edges.to_id.tolist()))
@@ -558,11 +660,7 @@ def _simplify_tracks(net: snkit.network.Network, buffer_distance: float, hole_ar
 
 def _drop_hanging_nodes(net, tolerance=1):
     """
-    from trail
-
-    This method drops any single degree nodes and their associated edges given a
-    distance(degrees) threshold. This primarily happens when a road was connected to residential
-    areas, most often these are link roads that no longer do so.
+    inspired from trail
 
     Args:
         net (class): A network composed of nodes (points in space) and edges (lines)
@@ -572,36 +670,45 @@ def _drop_hanging_nodes(net, tolerance=1):
         network (class): A network composed of nodes (points in space) and edges (lines)
 
     """
+
+    def _get_edges_with_hanging_nodes(egs: GeoDataFrame, hng_nds: np.ndarray) -> GeoDataFrame:
+        to_ids = egs['to_id'].to_numpy()
+        from_ids = egs['from_id'].to_numpy()
+        to_ids_ind = [(net.nodes['id'] == to_id).idxmax() for to_id in to_ids]
+        from_ids_ind = [(net.nodes['id'] == from_id).idxmax() for from_id in from_ids]
+        hng_to = np.isin(to_ids_ind, hng_nds)
+        hng_from = np.isin(from_ids_ind, hng_nds)
+        # eInd : An array containing the indices of edges that connect the degree 1 nodes
+        edge_ind = np.hstack((np.nonzero(hng_to), np.nonzero(hng_from)))
+        return egs.iloc[np.sort(edge_ind[0])]
+
     net = _get_nodes_degree(net)
-    deg = net.nodes['degree'].to_numpy()
-    node_id_deg = dict(zip(net.nodes.index, net.nodes['degree']))
-    # hangNodes : An array of the indices of nodes with degree 1
-
-    hangNodes = np.where(deg == 1)
     ed = net.edges.copy()
-    to_ids = ed['to_id'].to_numpy()
-    from_ids = ed['from_id'].to_numpy()
-    hangTo = np.isin(to_ids, hangNodes)
-    hangFrom = np.isin(from_ids, hangNodes)
-    # eInd : An array containing the indices of edges that connect the degree 1 nodes
-    eInd = np.hstack((np.nonzero(hangTo), np.nonzero(hangFrom)))
-    degEd = ed.iloc[np.sort(eInd[0])]
+    deg = net.nodes['degree'].to_numpy()
+    # hang_nodes : An array of the indices of nodes with degree 1
+    hang_nodes = np.where(deg == 1)
+    deg_ed = _get_edges_with_hanging_nodes(ed, hang_nodes)
     edge_id_drop = []
+    while len(deg_ed[deg_ed['demand_edge'] != 1]) > 0:  # while there are edges with deg 1 nodes, excluding demand_edges
+        for d in deg_ed[~(deg_ed['id'].isin(edge_id_drop))].itertuples():
+            dist = shapely.measurement.length(d.geometry)
+            # If the edge is shorter than the tolerance
+            # add the ID to the drop list and update involved node degrees
+            if dist < tolerance and d.demand_edge != 1:
+                edge_id_drop.append(d.id)
+                deg[(net.nodes['id'] == d.from_id).idxmax()] -= 1
+                deg[(net.nodes['id'] == d.to_id).idxmax()] -= 1
+            # # drops disconnected edges, some may still persist since we have not merged yet
+            # if deg[(net.nodes['id'] == d.from_id).idxmax()] == 1 and deg[(net.nodes['id'] == d.to_id).idxmax()] == 1 \
+            #         and d.demand_edge != 1:
+            #     edge_id_drop.append(d.id)
+            #     deg[(net.nodes['id'] == d.from_id).idxmax()] -= 1
+            #     deg[(net.nodes['id'] == d.to_id).idxmax()] -= 1
 
-    for d in degEd.itertuples():
-        dist = shapely.measurement.length(d.geometry)
-        # If the edge is shorter than the tolerance
-        # add the ID to the drop list and update involved node degrees
-        if dist < tolerance and d.demand_edge != 1:
-            edge_id_drop.append(d.id)
-            deg[(net.nodes['id'] == d.from_id).idxmax()] -= 1
-            deg[(net.nodes['id'] == d.to_id).idxmax()] -= 1
-        # drops disconnected edges, some may still persist since we have not merged yet
-        if deg[(net.nodes['id'] == d.from_id).idxmax()] == 1 and deg[(net.nodes['id'] == d.to_id).idxmax()] == 1 and\
-                d.demand_edge != 1:
-            edge_id_drop.append(d.id)
-            deg[(net.nodes['id'] == d.from_id).idxmax()] -= 1
-            deg[(net.nodes['id'] == d.to_id).idxmax()] -= 1
+        edges_copy = net.edges.copy()
+        edg = edges_copy.loc[~(edges_copy.id.isin(edge_id_drop))]
+        hang_nodes = np.where(deg == 1)
+        deg_ed = _get_edges_with_hanging_nodes(edg, hang_nodes)
 
     edg = ed.loc[~(ed.id.isin(edge_id_drop))].reset_index(drop=True)
     edg.drop(labels=['id'], axis=1, inplace=True)
@@ -610,7 +717,6 @@ def _drop_hanging_nodes(net, tolerance=1):
     # Degree 0 Nodes are cleaned in the merge_2 method
     nod = n.iloc[deg > 0].reset_index(drop=True)
     nod['degree'] = deg[deg > 0]
-    # ToDo: find deg 0 s recursively and make sure they are removed. Check why deg - ?
     return Network(nodes=nod, edges=edg)
 
 
