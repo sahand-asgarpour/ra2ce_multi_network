@@ -538,14 +538,14 @@ def _get_merge_edge_paths(edges: GeoDataFrame, excluded_edge_types: list, aggfun
                         # No demand node is in this loop. Then omit this loop and return empty gdf
                         return gpd.GeoDataFrame(data=None, columns=ntw.edges.columns, crs=ntw.edges.crs)
                     else:
-                        _merged = gdf
+                        return gdf
                 else:
                     # the only remaining option is two nodes with degrees bigger than 2
                     if len(gdf[gdf['demand_edge'] == 1]) == 0:
                         # No demand node is in this loop. Then omit this loop and return empty gdf
                         _merged = _get_merged_in_a_loop(_merged)
                     else:
-                        _merged = gdf
+                        return gdf
             else:
                 # 2.2. merging non-loop paths
                 path_extremities_node_ids = {i for i in set(gdf.from_id.tolist() + gdf.to_id.tolist())
