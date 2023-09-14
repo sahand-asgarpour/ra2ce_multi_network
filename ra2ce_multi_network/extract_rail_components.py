@@ -15,8 +15,8 @@ root_folder = OSM_DATA_DIR.parent
 iso3_code = "NLD"
 region_code = "Europe"
 
-dump_region = DICT_GEOFABRIK[iso3_code][1]
-# dump_region = region_code.lower()
+# dump_region = DICT_GEOFABRIK[iso3_code][1]
+dump_region = region_code.lower()
 
 dump_folder = root_folder / "osm_bpf"
 
@@ -34,7 +34,7 @@ extract_path = root_folder.joinpath('extracts')
 
 # source: https://taginfo.openstreetmap.org/tags/railway=rail#combinations
 # 'other_tags' key is a string chain of 'tags' => 'keys',
-# where relavant information is stored. e.g., whether traffic mode is freight or mixed
+# where relevant information is stored. e.g., whether traffic mode is freight or mixed
 rail_track_attributes = {
     'osm_keys': [
         'railway', 'name', 'gauge', 'electrified', 'voltage', 'bridge', 'maxspeed', 'service', 'tunnel', 'other_tags'
