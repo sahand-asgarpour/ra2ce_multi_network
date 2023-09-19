@@ -1,4 +1,4 @@
-from osm_flex.download import *
+import osm_flex.download as dl
 from osm_flex.extract import *
 from osm_flex.config import *
 import osm_flex.clip as cp
@@ -53,7 +53,7 @@ station_osm_query = """railway='station'"""
 
 ## Get the country or region dump
 # get_country_geofabrik(iso3=iso3_code, save_path=dump_folder)
-# get_region_geofabrik(region=region_code, save_path=dump_folder)
+# dl.get_region_geofabrik(region=region_code.lower(), save_path=dump_folder)
 
 ## Clip to the study area
 with open(clip_polygon_path) as f:
