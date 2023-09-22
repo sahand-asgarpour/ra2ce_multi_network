@@ -33,10 +33,12 @@ rail_net.nodes['od_id'] = rail_net.nodes.apply(
 
 # Add length and time to the edges
 
-rail_net.edges['distance'] = rail_net.edges['geometry'].length * 111.32  # distance in km
+rail_net.edges['length'] = rail_net.edges['geometry'].length * 111.32  # length in km
 rail_net.edges['max_speed'] = pd.to_numeric(rail_net.edges['maxspeed'], errors='coerce')
 rail_net.edges.fillna(rail_net.edges.max_speed.mean(), inplace=True)
-rail_net.edges['time'] = rail_net.edges['distance']/rail_net.edges['max_speed']  # time iin hour
+rail_net.edges['time'] = rail_net.edges['length']/rail_net.edges['max_speed']  # time iin hour
+rail_net.edges['rfid'] = rail_net.edges['id']  # id of the corresponding edge in the simple graph
+
 
 # od_table is made based on the ra2ce expected attributes (names and structure)
 od_gdf = rail_net.nodes[rail_net.nodes.possible_terminal == 1]
@@ -48,7 +50,8 @@ od_gdf = od_gdf.rename(columns={"id": "OBJECTID"})
 od_gdf.to_feather(root_folder.joinpath(f'static/output_graph/origin_destination_table.feather'))
 
 # convert rail network to a NetworkX graph
-graph = nx.Graph()
+graph = nx.MultiGraph()
+
 for index, row in rail_net.nodes.iterrows():
     node_id = row['id']
     attributes = {k: v for k, v in row.items()}
@@ -57,6 +60,7 @@ for index, row in rail_net.nodes.iterrows():
 for index, row in rail_net.edges.iterrows():
     u = row['from_id']
     v = row['to_id']
+    # This should be AtlasView or something like that
     attributes = {k: v for k, v in row.items()}
     graph.add_edge(u, v, **attributes)
 
