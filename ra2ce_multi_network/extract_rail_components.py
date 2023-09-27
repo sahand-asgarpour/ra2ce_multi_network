@@ -21,7 +21,7 @@ dump_region = region_code.lower()
 dump_folder = root_folder / "osm_bpf"
 
 ## Clipping-related
-study_area_suffix = '_test'
+study_area_suffix = '_NL_BL_GR'
 clip_polygon_path = Path(
     rf'C:\Users\asgarpou\osm\osm_bpf\polygon{study_area_suffix}.geojson'
 )
