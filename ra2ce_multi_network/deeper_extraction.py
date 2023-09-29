@@ -25,8 +25,9 @@ def filter_on_other_tags(attributes: dict, other_tags_keys: list, gdf: gpd.GeoDa
 
 
 def _filter(_flt: str, _attr: str):
-    if _flt in _attr:
-        if _flt.split('=>')[1] == "":
-            return next((tag_kay.split('=>')[1] for tag_kay in _attr.split(",") if _flt in tag_kay), None)
-        else:
-            return _flt.split('=>')[1]
+    if _attr is not None:
+        if _flt in _attr:
+            if _flt.split('=>')[1] == "":
+                return next((tag_kay.split('=>')[1] for tag_kay in _attr.split(",") if _flt in tag_kay), None)
+            else:
+                return _flt.split('=>')[1]
