@@ -148,7 +148,7 @@ def _aggregate_terminal_nodes(network: snkit.network.Network, aggregation_range:
 
 
 def _km_distance_to_degrees(distance_km: float):
-    return distance_km * 1 / 111.32
+    return distance_km / 111.32
 
 
 def _add_demand_edge(network: snkit.network.Network) -> snkit.network.Network:

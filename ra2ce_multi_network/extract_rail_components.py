@@ -50,7 +50,7 @@ station_attributes = {
     'osm_keys': ['railway', 'name', 'other_tags'],
     'other_tags': ['"train"=>']
 }
-rail_track_osm_query = """railway='rail' or railway='light_rail'"""
+rail_track_osm_query = """railway='rail'"""  # or railway='light_rail'
 station_osm_query = """railway='station'"""
 
 ### Run the functions

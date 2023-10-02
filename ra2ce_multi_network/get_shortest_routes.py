@@ -13,7 +13,7 @@ from ra2ce.graph.network_config_data.network_config_data import NetworkConfigDat
 root_folder = Path(
     r'C:\Users\asgarpou\OneDrive - Stichting Deltares\Documents\Projects\Long involvement\SITO_Netwerk to system\project_files\get_shortest_routes')
 ## Defining ini variables
-study_area_suffix = '_ROTTERDAM_PORT'
+study_area_suffix = '_GR'  # small case study area that works: '_ROTTERDAM_PORT'
 clip_output_name = f'study_area{study_area_suffix}'
 rail_net_file = root_folder.joinpath(f'static/network/merged_rail_network_{clip_output_name}.geojson')
 
@@ -82,6 +82,6 @@ optimal_routes_gdf = analysis.optimal_route_origin_destination(graph, analysis.c
 optimal_routes_gdf = optimal_routes_gdf[~optimal_routes_gdf['geometry'].is_empty]
 
 # Save
-optimal_routes_gdf.to_pickle(root_folder / 'output' / 'optimal_routes.pkl')
-optimal_routes_gdf.to_csv(path_or_buf=root_folder / 'output' / 'optimal_routes.csv', index=False)
+optimal_routes_gdf.to_pickle(root_folder / 'output' / f'optimal_routes{study_area_suffix}.pkl')
+optimal_routes_gdf.to_csv(path_or_buf=root_folder / 'output' / f'optimal_routes{study_area_suffix}.csv', index=False)
 a = 1
