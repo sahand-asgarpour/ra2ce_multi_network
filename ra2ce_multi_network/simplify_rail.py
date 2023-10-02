@@ -1,3 +1,4 @@
+import pyproj
 import triangle as tr
 from geopandas import GeoSeries
 from networkx import MultiDiGraph, Graph
@@ -88,11 +89,14 @@ def _aggregate_terminal_nodes(network: snkit.network.Network, aggregation_range:
         aggregation_range_degree = _km_distance_to_degrees(aggregation_range)
         if _gdf.empty:
             return None
-        _centroid_terminal_collection = _gdf['geometry'].unary_union.centroid
+        _centroid_terminal_collection = _gdf['geometry'].unary_union.centroid  # the point(its gdf) does not have crs
+        transformer = pyproj.Transformer.from_crs("epsg:4326", pyproj.CRS("epsg:4326"), always_xy=True)
+        projected_centroid_terminal_collection = Point(transformer.transform(_centroid_terminal_collection.x,
+                                                                             _centroid_terminal_collection.y))
         _terminal_collection_ids = _gdf['id'].tolist()
 
-        return gpd.GeoDataFrame({'id': new_id, 'geometry': Point(_centroid_terminal_collection.x,
-                                                                 _centroid_terminal_collection.y),
+        return gpd.GeoDataFrame({'id': new_id, 'geometry': Point(projected_centroid_terminal_collection.x,
+                                                                 projected_centroid_terminal_collection.y),
                                  'possible_terminal': 1,
                                  'terminal_collection': [
                                      {term_col for _id in _terminal_collection_ids
@@ -101,9 +105,9 @@ def _aggregate_terminal_nodes(network: snkit.network.Network, aggregation_range:
                                       ].values[0]}
                                  ],
                                  'aggregate': 1,
-                                 'buffer': Point(
-                                     _centroid_terminal_collection.x, _centroid_terminal_collection.y
-                                 ).buffer(aggregation_range_degree),
+                                 'buffer': Point(projected_centroid_terminal_collection.x,
+                                                 projected_centroid_terminal_collection.y
+                                                 ).buffer(aggregation_range_degree),
                                  },
                                 crs=node_gdf.crs)
 
@@ -325,6 +329,7 @@ def _merge_edges(network: snkit.network.Network, excluded_edge_types: List[str])
         }
 
     network = merge_edges(network, aggfunc=aggfunc, by=excluded_edge_types)
+    network.edges['length'] = network.edges['geometry'].length * 111.32  # length in km
     network.edges = network.edges[network.edges['length'] != 0]  # sometimes such links emerge during merging.
     return network
 
