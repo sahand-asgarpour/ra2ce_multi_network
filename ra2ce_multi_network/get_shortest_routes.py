@@ -1,5 +1,3 @@
-# ToDo: Define OD matrix: use the detected terminals + assign them some number + define the region
-# ToDo: Load config relevant to OD module + run the algorithm
 # ToDo: visualise the results
 import numpy as np
 import pandas as pd
@@ -9,12 +7,12 @@ import networkx as nx
 
 from ra2ce.analyses.analysis_config_data.readers.analysis_config_reader_factory import AnalysisConfigReaderFactory
 from ra2ce.analyses.indirect.analyses_indirect import IndirectAnalyses
-from ra2ce.analyses.indirect.traffic_analysis.traffic_analysis import TrafficAnalysis
 from ra2ce.graph.network_config_data.network_config_data import NetworkConfigData
 
 # Defining ini variables
 root_folder = Path(
     r'C:\Users\asgarpou\OneDrive - Stichting Deltares\Documents\Projects\Long involvement\SITO_Netwerk to system\project_files\get_shortest_routes')
+## Defining ini variables
 study_area_suffix = '_ROTTERDAM_PORT'
 clip_output_name = f'study_area{study_area_suffix}'
 rail_net_file = root_folder.joinpath(f'static/network/merged_rail_network_{clip_output_name}.geojson')
@@ -36,9 +34,10 @@ rail_net.nodes['od_id'] = rail_net.nodes.apply(
 rail_net.edges['length'] = rail_net.edges['geometry'].length * 111.32  # length in km
 rail_net.edges['max_speed'] = pd.to_numeric(rail_net.edges['maxspeed'], errors='coerce')
 rail_net.edges.fillna(rail_net.edges.max_speed.mean(), inplace=True)
-rail_net.edges['time'] = rail_net.edges['length']/rail_net.edges['max_speed']  # time iin hour
+rail_net.edges['time'] = rail_net.edges['length'] / rail_net.edges['max_speed']  # time iin hour
 rail_net.edges['rfid'] = rail_net.edges['id']  # id of the corresponding edge in the simple graph
 
+rail_net.edges = rail_net.edges[rail_net.edges['length'] != 0]
 
 # od_table is made based on the ra2ce expected attributes (names and structure)
 od_gdf = rail_net.nodes[rail_net.nodes.possible_terminal == 1]
@@ -77,5 +76,12 @@ analysis_ini = root_folder.joinpath(r'analysis.ini')
 
 analysis_config = AnalysisConfigReaderFactory().read(ini_file=analysis_ini, network_config=network_config_dict)
 analysis = IndirectAnalyses(config=analysis_config, graphs=graph)
-optimal_routes = analysis.optimal_route_origin_destination(graph, analysis.config['indirect'][0])
+
+# Run
+optimal_routes_gdf = analysis.optimal_route_origin_destination(graph, analysis.config['indirect'][0])
+optimal_routes_gdf = optimal_routes_gdf[~optimal_routes_gdf['geometry'].is_empty]
+
+# Save
+optimal_routes_gdf.to_pickle(root_folder / 'output' / 'optimal_routes.pkl')
+optimal_routes_gdf.to_csv(path_or_buf=root_folder / 'output' / 'optimal_routes.csv', index=False)
 a = 1

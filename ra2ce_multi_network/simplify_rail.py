@@ -325,6 +325,7 @@ def _merge_edges(network: snkit.network.Network, excluded_edge_types: List[str])
         }
 
     network = merge_edges(network, aggfunc=aggfunc, by=excluded_edge_types)
+    network.edges = network.edges[network.edges['length'] != 0]  # sometimes such links emerge during merging.
     return network
 
 
