@@ -32,13 +32,15 @@ def get_rail_network_with_terminals(network_gdf: gpd.GeoDataFrame, aggregation_r
     return network
 
 
-def get_rail_network_with_given_terminals(network_gdf: gpd.GeoDataFrame, od_file: Path) -> (
+def get_rail_network_with_given_terminals(network_gdf: gpd.GeoDataFrame, od_file: Path, network=None) -> (
         snkit.network.Network):
-    network = _make_network_from_gdf(network_gdf=network_gdf)
+    if network is None:
+        network = _make_network_from_gdf(network_gdf=network_gdf)
     network.set_crs(crs="EPSG:4326")
     network = _drop_hanging_nodes(network)
     graph = _network_to_nx(network)
-    od_gdf, graph = add_od_nodes(od=gpd.read_file(od_file), graph=graph, crs="EPSG:4326")
+    od_gdf, graph = add_od_nodes(od=gpd.read_file(od_file), graph=graph, crs=graph)
+    network = _nx_to_network(graph)
     network = _reset_indices(network)
     return network
 
@@ -75,7 +77,7 @@ def _network_to_nx(net: snkit.network.Network, node_id_column_name='id',
     return g
 
 
-def _nx_to_network(g: MultiDiGraph, node_id_column_name='id',
+def _nx_to_network(g: MultiGraph, node_id_column_name='id',
                    edge_from_id_column='from_id', edge_to_id_column='to_id') -> snkit.network.Network:
     network = snkit.network.Network()
 
@@ -781,19 +783,34 @@ def _drop_hanging_nodes(net, tolerance=1):
     hang_nodes = np.where(deg == 1)
     deg_ed = _get_edges_with_hanging_nodes(ed, hang_nodes)
     edge_id_drop = []
-    while len(deg_ed[deg_ed['demand_edge'] != 1]) > 0:  # while there are edges with deg 1 node, excluding demand_edges
-        for d in deg_ed[~(deg_ed['id'].isin(edge_id_drop))].itertuples():
-            dist = shapely.measurement.length(d.geometry)
-            # If the edge is shorter than the tolerance
-            # add the ID to the drop list and update involved node degrees
-            if dist < tolerance and d.demand_edge != 1:
-                edge_id_drop.append(d.id)
-                deg[(net.nodes['id'] == d.from_id).idxmax()] -= 1
-                deg[(net.nodes['id'] == d.to_id).idxmax()] -= 1
-        edges_copy = net.edges.copy()
-        edg = edges_copy.loc[~(edges_copy.id.isin(edge_id_drop))]
-        hang_nodes = np.where(deg == 1)
-        deg_ed = _get_edges_with_hanging_nodes(edg, hang_nodes)
+    if 'demand_edge' in deg_ed.columns:
+        while len(deg_ed[deg_ed['demand_edge'] != 1]) > 0:  # while there are edges with deg 1 node, excluding dem_edges
+            for d in deg_ed[~(deg_ed['id'].isin(edge_id_drop))].itertuples():
+                dist = shapely.measurement.length(d.geometry)
+                # If the edge is shorter than the tolerance
+                # add the ID to the drop list and update involved node degrees
+                if dist < tolerance and d.demand_edge != 1:
+                    edge_id_drop.append(d.id)
+                    deg[(net.nodes['id'] == d.from_id).idxmax()] -= 1
+                    deg[(net.nodes['id'] == d.to_id).idxmax()] -= 1
+            edges_copy = net.edges.copy()
+            edg = edges_copy.loc[~(edges_copy.id.isin(edge_id_drop))]
+            hang_nodes = np.where(deg == 1)
+            deg_ed = _get_edges_with_hanging_nodes(edg, hang_nodes)
+    else:
+        while len(deg_ed) > 0:  # while there are edges with deg 1 node, excluding dem_edges
+            for d in deg_ed[~(deg_ed['id'].isin(edge_id_drop))].itertuples():
+                dist = shapely.measurement.length(d.geometry)
+                # If the edge is shorter than the tolerance
+                # add the ID to the drop list and update involved node degrees
+                if dist < tolerance:
+                    edge_id_drop.append(d.id)
+                    deg[(net.nodes['id'] == d.from_id).idxmax()] -= 1
+                    deg[(net.nodes['id'] == d.to_id).idxmax()] -= 1
+            edges_copy = net.edges.copy()
+            edg = edges_copy.loc[~(edges_copy.id.isin(edge_id_drop))]
+            hang_nodes = np.where(deg == 1)
+            deg_ed = _get_edges_with_hanging_nodes(edg, hang_nodes)
 
     edg = ed.loc[~(ed.id.isin(edge_id_drop))].reset_index(drop=True)
     edg.drop(labels=['id'], axis=1, inplace=True)
