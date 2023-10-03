@@ -8,6 +8,7 @@ import networkx as nx
 from ra2ce.analyses.analysis_config_data.readers.analysis_config_reader_factory import AnalysisConfigReaderFactory
 from ra2ce.analyses.indirect.analyses_indirect import IndirectAnalyses
 from ra2ce.graph.network_config_data.network_config_data import NetworkConfigData
+from ra2ce_multi_network.simplify_rail import _network_to_nx
 
 # Defining ini variables
 root_folder = Path(
@@ -20,6 +21,9 @@ rail_net_file = root_folder.joinpath(f'static/network/merged_rail_network_{clip_
 # Load rail_net
 with open(rail_net_file, 'rb') as handle:
     rail_net = pickle.load(handle)
+
+rail_net.edges = rail_net.edges.to_crs(4326)
+rail_net.nodes = rail_net.nodes.to_crs(4326)
 
 # Add Origin and Destination tags to the relevant nodes. All terminals are both origins and destinations
 rail_net.nodes['o_id'] = rail_net.nodes.apply(
@@ -49,22 +53,9 @@ od_gdf = od_gdf.rename(columns={"id": "OBJECTID"})
 od_gdf.to_feather(root_folder.joinpath(f'static/output_graph/origin_destination_table.feather'))
 
 # convert rail network to a NetworkX graph
-graph = nx.MultiGraph()
-
-for index, row in rail_net.nodes.iterrows():
-    node_id = row['id']
-    attributes = {k: v for k, v in row.items()}
-    graph.add_node(node_id, **attributes)
-
-for index, row in rail_net.edges.iterrows():
-    u = row['from_id']
-    v = row['to_id']
-    # This should be AtlasView or something like that
-    attributes = {k: v for k, v in row.items()}
-    graph.add_edge(u, v, **attributes)
+graph = _network_to_nx(rail_net)
 
 # Setting up the traffic analysis based on ra2ce
-
 network_config = NetworkConfigData()
 network_config.network.primary_file = graph
 network_config.output_path = root_folder.joinpath(f'output')

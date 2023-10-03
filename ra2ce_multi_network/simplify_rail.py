@@ -1,7 +1,10 @@
+from pathlib import Path
+
 import pyproj
 import triangle as tr
+from geojson import GeoJSON
 from geopandas import GeoSeries
-from networkx import MultiDiGraph, Graph
+from networkx import MultiDiGraph, Graph, MultiGraph
 from pandas import Index
 from shapely import Polygon, MultiPolygon, MultiLineString
 from typing import Union, List
@@ -12,6 +15,7 @@ import snkit.network
 
 from snkit.network import *
 
+from ra2ce.graph.origins_destinations import add_od_nodes
 from trails import *
 
 
@@ -25,6 +29,17 @@ def get_rail_network_with_terminals(network_gdf: gpd.GeoDataFrame, aggregation_r
     network = _add_demand_edge(network)
     network = _reset_indices(network)
     network.set_crs(crs="EPSG:4326")
+    return network
+
+
+def get_rail_network_with_given_terminals(network_gdf: gpd.GeoDataFrame, od_file: Path) -> (
+        snkit.network.Network):
+    network = _make_network_from_gdf(network_gdf=network_gdf)
+    network.set_crs(crs="EPSG:4326")
+    network = _drop_hanging_nodes(network)
+    graph = _network_to_nx(network)
+    od_gdf, graph = add_od_nodes(od=gpd.read_file(od_file), graph=graph, crs="EPSG:4326")
+    network = _reset_indices(network)
     return network
 
 
@@ -42,6 +57,35 @@ def _make_network_from_gdf(network_gdf: gpd.GeoDataFrame) -> snkit.network.Netwo
     net.edges.to_id = net.edges.to_id.str.extract(r"(\d+)", expand=False).astype(int)
     net.edges.id = net.edges.id.str.extract(r"(\d+)", expand=False).astype(int)
     return net
+
+
+def _network_to_nx(net: snkit.network.Network, node_id_column_name='id',
+                   edge_from_id_column='from_id', edge_to_id_column='to_id') -> MultiGraph:
+    g = nx.MultiGraph()
+    for index, row in net.nodes.iterrows():
+        node_id = row[node_id_column_name]
+        attributes = {k: v for k, v in row.items()}
+        g.add_node(node_id, **attributes)
+
+    for index, row in net.edges.iterrows():
+        u = row[edge_from_id_column]
+        v = row[edge_to_id_column]
+        attributes = {k: v for k, v in row.items()}
+        g.add_edge(u, v, **attributes)
+    return g
+
+
+def _nx_to_network(g: MultiDiGraph, node_id_column_name='id',
+                   edge_from_id_column='from_id', edge_to_id_column='to_id') -> snkit.network.Network:
+    network = snkit.network.Network()
+
+    node_attributes = [{node_id_column_name: node, **data} for node, data in g.nodes(data=True)]
+    network.nodes = gpd.GeoDataFrame(node_attributes)
+
+    edge_attributes = [{edge_from_id_column: u, edge_to_id_column: v, **data} for u, v, data in g.edges(data=True)]
+    network.edges = gpd.GeoDataFrame(edge_attributes)
+
+    return network
 
 
 def _detect_possible_terminals(network: snkit.network.Network) -> snkit.network.Network:
