@@ -39,9 +39,8 @@ def get_rail_network_with_given_terminals(network_gdf: gpd.GeoDataFrame, od_file
     network.set_crs(crs="EPSG:4326")
     network = _drop_hanging_nodes(network)
     graph = _network_to_nx(network)
-    od_gdf, graph = add_od_nodes(od=gpd.read_file(od_file), graph=graph, crs=graph)
+    od_gdf, graph = add_od_nodes(od=gpd.read_file(od_file), graph=graph, crs=pyproj.CRS("EPSG:4326"))
     network = _nx_to_network(graph)
-    network = _reset_indices(network)
     return network
 
 
@@ -77,7 +76,7 @@ def _network_to_nx(net: snkit.network.Network, node_id_column_name='id',
     return g
 
 
-def _nx_to_network(g: MultiGraph, node_id_column_name='id',
+def _nx_to_network(g: Union[MultiGraph, MultiDiGraph], node_id_column_name='id',
                    edge_from_id_column='from_id', edge_to_id_column='to_id') -> snkit.network.Network:
     network = snkit.network.Network()
 
