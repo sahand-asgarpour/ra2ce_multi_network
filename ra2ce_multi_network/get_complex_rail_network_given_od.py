@@ -39,8 +39,19 @@ rail_network = Network(
     nodes=gpd.read_file(output_folder.joinpath(f'rail_nodes_dropped_hanging_{clip_output_name}.geojson')),
     edges=gpd.read_file(output_folder.joinpath(f'rail_edges_dropped_hanging_{clip_output_name}.geojson'))
 )
+
 graph = _network_to_nx(rail_network)
 od_gdf, graph = add_od_nodes(od=gpd.read_file(od_file), graph=graph, crs=pyproj.CRS("EPSG:4326"))
+
+od_gdf.to_file(od_file, driver="GeoJSON")
+with open(output_folder.joinpath(f'rail_complex_graph_origin_destinations_mapped_{clip_output_name}.pkl'), 'wb') as f:
+    pickle.dump(graph, f)
+
 rail_network = _nx_to_network(graph)
-rail_network = _reset_indices(rail_network)
+
+rail_network.nodes.to_file(output_folder.joinpath(
+    f'rail_nodes_complex_graph_origin_destinations_mapped_{clip_output_name}.geojson'), driver="GeoJSON")
+rail_network.edges.to_file(output_folder.joinpath(
+    f'rail_edges_complex_graph_origin_destinations_mapped_{clip_output_name}.geojson'), driver="GeoJSON")
+
 a = 1
