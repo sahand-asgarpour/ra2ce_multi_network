@@ -552,9 +552,9 @@ def _get_merge_edge_paths(edges: GeoDataFrame, excluded_edge_types: list, aggfun
 
         def _get_merged_one_or_none_demand_edges(_merged, path_extrms_nod_ids: set) -> GeoDataFrame:
             _start_edges = gdf[gdf['intersections'].apply(lambda x: len(x) == 1)]
-            if len(gdf[gdf['demand_edge'] == 1]) == 1:
+            if ('demand_edge' in gdf.columns) and (len(gdf[gdf['demand_edge'] == 1])) == 1:
                 _start_edge = _start_edges[_start_edges.demand_edge == 1].iloc[0]
-            else:
+            elif ('demand_edge' not in gdf.columns) or (len(gdf[gdf['demand_edge'] == 1])) != 0:
                 _start_edge = _start_edges.iloc[0]
             start_path_extrms = [_start_edge['from_id']
                                  if _start_edge['from_id'] in list(path_extrms_nod_ids)
@@ -580,14 +580,26 @@ def _get_merge_edge_paths(edges: GeoDataFrame, excluded_edge_types: list, aggfun
                 # 2.1. a loop with two nodes degree > 2
                 gdf_node_ids = list(set(gdf.from_id.tolist() + gdf.to_id.tolist()))
                 gdf_node_slice = ntw.nodes[ntw.nodes['id'].isin(gdf_node_ids)]
-                if len(gdf_node_slice[gdf_node_slice['degree'] > 2]) == 1:
-                    # 2.1.1. If there is only one node with the degree bigger than 2
-                    if len(gdf[gdf['demand_edge'] == 1]) == 0:
+                if len(gdf_node_slice[gdf_node_slice['degree'] > 2]) == 0:
+                    # 2.1.1. a loop with only degree 2 edges => isolated from the rest of the graph
+                    warnings.warn(f'''
+                    A sub-graph loop isolated from the main graph is detected and removed.
+                    This isolated part had {len(gdf_node_slice)} nodes with node_fids {gdf_node_slice.id.tolist()} in
+                    the input node graph.
+                    ''')
+                    if 'demand_edge' in gdf.columns:
+                        warnings.warn(f''''This sub-graph had these demand nodes {(
+                                       gdf[gdf.demand_edge == 1].from_id.tolist() +
+                                       gdf[gdf.demand_edge == 1].to_id.tolist()
+                               )}''')
+                    return gpd.GeoDataFrame(data=None, columns=ntw.edges.columns, crs=ntw.edges.crs)
+
+                elif len(gdf_node_slice[gdf_node_slice['degree'] > 2]) == 1:
+                    # 2.1.2. If there is only one node with the degree bigger than 2
+                    if 'demand_edge' not in gdf.columns or len(gdf[gdf['demand_edge'] == 1]) == 0:
                         # No demand node is in this loop. Then omit this loop and return empty gdf
                         return gpd.GeoDataFrame(data=None, columns=ntw.edges.columns, crs=ntw.edges.crs)
-                    # else:
-                    #     return gdf
-                    else:
+                    elif 'demand_edge' in gdf.columns and len(gdf[gdf['demand_edge'] == 1]) > 0:
                         demand_node_ids = [
                             i for i in set(gdf.from_id.tolist() + gdf.to_id.tolist())
                             if (
@@ -608,9 +620,9 @@ def _get_merge_edge_paths(edges: GeoDataFrame, excluded_edge_types: list, aggfun
                                                          }
                             _merged = _get_merged_multiple_demand_edges(_merged, path_extremities_node_ids)
                 else:
-                    # the only remaining option is two nodes with degrees bigger than 2
-                    if len(gdf[gdf['demand_edge'] == 1]) == 0:
-                        # No demand node is in this loop. Then omit this loop and return empty gdf
+                    # 2.1.3. the only remaining option is two nodes with degrees bigger than 2
+                    if 'demand_edge' not in gdf.columns or len(gdf[gdf['demand_edge'] == 1]) == 0:
+                        # No demand node is in this loop. Then merge
                         _merged = _get_merged_in_a_loop(_merged)
                     else:
                         return gdf
@@ -618,9 +630,10 @@ def _get_merge_edge_paths(edges: GeoDataFrame, excluded_edge_types: list, aggfun
                 # 2.2. merging non-loop paths
                 path_extremities_node_ids = {i for i in set(gdf.from_id.tolist() + gdf.to_id.tolist())
                                              if (gdf.from_id.tolist() + gdf.to_id.tolist()).count(i) == 1}
-                if len(gdf[gdf['demand_edge'] == 1]) > 1:
+                if ('demand_edge' in gdf.columns) and (len(gdf[gdf['demand_edge'] == 1]) > 1):
                     _merged = _get_merged_multiple_demand_edges(_merged, path_extremities_node_ids)
-                else:
+                elif (('demand_edge' in gdf.columns and len(gdf[gdf['demand_edge'] == 1]) <= 1) or
+                      ('demand_edge' not in gdf.columns)):
                     # 2.2.2. no dem node is in the to_be_merged path or only one dem node. In the later case dem node
                     # will not be dissolved because it is in the path_extremities_node_ids
                     _merged = _get_merged_one_or_none_demand_edges(_merged, path_extremities_node_ids)
@@ -702,8 +715,6 @@ def _get_edge_paths(node_set: set, net: snkit.network.Network) -> list:
     edge_paths = []
 
     while node_set:
-        if len(node_set) % 1000 == 0:
-            print(len(node_set))
         popped_node = node_set.pop()
         node_path = {popped_node}
         candidates = {popped_node}

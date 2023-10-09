@@ -18,8 +18,8 @@ rail_track_gdf = gpd.read_file(rail_track_file)
 od_file = root_folder.joinpath('static/network/od_nodes.geojson')
 od_gdf = gpd.read_file(od_file)
 
-# Create a network and save it
-rail_network = _make_network_from_gdf(network_gdf=rail_track_gdf)
+# # Create a network and save it
+# rail_network = _make_network_from_gdf(network_gdf=rail_track_gdf)
 # rail_network.edges.to_file(output_folder.joinpath(f'rail_edges_{clip_output_name}.geojson'), driver="GeoJSON")
 # rail_network.nodes.to_file(output_folder.joinpath(f'rail_nodes_{clip_output_name}.geojson'), driver="GeoJSON")
 
@@ -27,24 +27,24 @@ rail_network = _make_network_from_gdf(network_gdf=rail_track_gdf)
 # rail_network = Network(nodes=gpd.read_file(output_folder.joinpath(f'rail_nodes_{clip_output_name}.geojson')),
 #                        edges=gpd.read_file(output_folder.joinpath(f'rail_edges_{clip_output_name}.geojson')))
 
-rail_network.set_crs(crs="EPSG:4326")
-rail_network = _drop_hanging_nodes(rail_network)
+# rail_network.set_crs(crs="EPSG:4326")
+# rail_network = _drop_hanging_nodes(rail_network)
 # rail_network.nodes.to_file(output_folder.joinpath(f'rail_nodes_dropped_hanging_{clip_output_name}.geojson'),
 #                            driver="GeoJSON")
 # rail_network.edges.to_file(output_folder.joinpath(f'rail_edges_dropped_hanging_{clip_output_name}.geojson'),
 #                            driver="GeoJSON")
 
-# map od nodes to the rail network
-# rail_network = Network(
-#     nodes=gpd.read_file(output_folder.joinpath(f'rail_nodes_dropped_hanging_{clip_output_name}.geojson')),
-#     edges=gpd.read_file(output_folder.joinpath(f'rail_edges_dropped_hanging_{clip_output_name}.geojson'))
-# )
+# # map od nodes to the rail network
+rail_network = Network(
+    nodes=gpd.read_file(output_folder.joinpath(f'rail_nodes_dropped_hanging_{clip_output_name}.geojson')),
+    edges=gpd.read_file(output_folder.joinpath(f'rail_edges_dropped_hanging_{clip_output_name}.geojson'))
+)
 
 complex_graph = _network_to_nx(rail_network)
 od_gdf, complex_graph = add_od_nodes(od=gpd.read_file(od_file), graph=complex_graph, crs=pyproj.CRS("EPSG:4326"))
 
 od_gdf.to_file(od_file, driver="GeoJSON")
-with open(output_folder.joinpath(f'rail_complex_graph_origin_destinations_mapped_{clip_output_name}.pkl'), 'wb') as f:
+with open(output_folder.joinpath(f'rail_complex_graph_origin_destinations_mapped_{clip_output_name}.p'), 'wb') as f:
     pickle.dump(complex_graph, f)
 
 rail_network = _nx_to_network(complex_graph)
