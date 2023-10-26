@@ -376,6 +376,10 @@ def _merge_edges(network: snkit.network.Network, excluded_edge_types: List[str])
     network = merge_edges(network, aggfunc=aggfunc, by=excluded_edge_types)
     network.edges['length'] = network.edges['geometry'].length * 111.32  # length in km
     network.edges = network.edges[network.edges['length'] != 0]  # sometimes such links emerge during merging.
+
+    convert_to_line_string = lambda geom: linemerge(
+        [line for line in geom.geoms]) if isinstance(geom, MultiLineString) else geom
+    network.edges['geometry'] = network.edges['geometry'].apply(convert_to_line_string)
     return network
 
 
@@ -589,9 +593,9 @@ def _get_merge_edge_paths(edges: GeoDataFrame, excluded_edge_types: list, aggfun
                     ''')
                     if 'demand_edge' in gdf.columns:
                         warnings.warn(f''''This sub-graph had these demand nodes {(
-                                       gdf[gdf.demand_edge == 1].from_id.tolist() +
-                                       gdf[gdf.demand_edge == 1].to_id.tolist()
-                               )}''')
+                                gdf[gdf.demand_edge == 1].from_id.tolist() +
+                                gdf[gdf.demand_edge == 1].to_id.tolist()
+                        )}''')
                     return gpd.GeoDataFrame(data=None, columns=ntw.edges.columns, crs=ntw.edges.crs)
 
                 elif len(gdf_node_slice[gdf_node_slice['degree'] > 2]) == 1:
