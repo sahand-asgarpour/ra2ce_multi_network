@@ -558,7 +558,7 @@ def _get_merge_edge_paths(edges: GeoDataFrame, excluded_edge_types: list, aggfun
             _start_edges = gdf[gdf['intersections'].apply(lambda x: len(x) == 1)]
             if ('demand_edge' in gdf.columns) and (len(gdf[gdf['demand_edge'] == 1])) == 1:
                 _start_edge = _start_edges[_start_edges.demand_edge == 1].iloc[0]
-            elif ('demand_edge' not in gdf.columns) or (len(gdf[gdf['demand_edge'] == 1])) != 0:
+            elif ('demand_edge' not in gdf.columns) or (len(gdf[gdf['demand_edge'] == 1])) != 1:
                 _start_edge = _start_edges.iloc[0]
             start_path_extrms = [_start_edge['from_id']
                                  if _start_edge['from_id'] in list(path_extrms_nod_ids)
