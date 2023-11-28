@@ -634,13 +634,16 @@ def _get_merge_edge_paths(edges: GeoDataFrame, excluded_edge_types: list, aggfun
                 # 2.2. merging non-loop paths
                 path_extremities_node_ids = {i for i in set(gdf.from_id.tolist() + gdf.to_id.tolist())
                                              if (gdf.from_id.tolist() + gdf.to_id.tolist()).count(i) == 1}
+                # if len(path_extremities_node_ids) > 0:
                 if ('demand_edge' in gdf.columns) and (len(gdf[gdf['demand_edge'] == 1]) > 1):
                     _merged = _get_merged_multiple_demand_edges(_merged, path_extremities_node_ids)
                 elif (('demand_edge' in gdf.columns and len(gdf[gdf['demand_edge'] == 1]) <= 1) or
                       ('demand_edge' not in gdf.columns)):
-                    # 2.2.2. no dem node is in the to_be_merged path or only one dem node. In the later case dem node
+                    # 2.2.2.no dem node is in the to_be_merged path or only one dem node. In the later case dem node
                     # will not be dissolved because it is in the path_extremities_node_ids
                     _merged = _get_merged_one_or_none_demand_edges(_merged, path_extremities_node_ids)
+                # else:
+                #     raise Warning(f"""Check the lines with the following ids {gdf.id.tolist()} """)
 
             merged_id = 'to_be_updated'  # the edge id of the merged edge will be updated later
         _merged.id = merged_id
@@ -666,18 +669,24 @@ def _get_merge_edge_paths(edges: GeoDataFrame, excluded_edge_types: list, aggfun
     return merged_edges
 
 
-def _get_intersections(_edge: GeoSeries, _edges: GeoDataFrame) -> list:
+def _get_intersections(_edge, _edges):
     intersections = []
-    for other_edge in _edges.itertuples(index=False):
-        if _edge.id != other_edge.id:  # avoid self-intersection
-            intersection = _edge.geometry.intersection(other_edge.geometry)
-            if not intersection.is_empty and \
-                    any((intersection.intersects(boundary)) for boundary in _edge.geometry.boundary.geoms):
+    edge_geometry = _edge.geometry.simplify(tolerance=1e-8)
+
+    for other_edge_index, other_edge in _edges.iterrows():
+        other_edge_geometry = other_edge.geometry.simplify(tolerance=1e-8)
+
+        if not edge_geometry.equals(other_edge_geometry):  # avoid self-intersection
+            intersection = edge_geometry.intersection(other_edge_geometry)
+
+            if not intersection.is_empty and any(
+                    intersection.intersects(boundary) for boundary in edge_geometry.boundary.geoms):
                 if isinstance(intersection, MultiPoint):
-                    intersections.extend([point.coords[0] for point in intersection.geoms if
-                                          point in other_edge.geometry.boundary.geoms])
+                    intersections.extend(
+                        [point.coords[0] for point in intersection.geoms if point in other_edge_geometry.boundary.geoms])
                 else:
                     intersections.append(intersection.coords[0])
+
     return sorted(intersections, key=lambda x: x[0])
 
 
