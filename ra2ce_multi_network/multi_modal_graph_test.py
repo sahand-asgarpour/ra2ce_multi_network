@@ -19,10 +19,16 @@ with open(root_folder.joinpath(f'static/output_graph/merged_rail_network_od_mapp
 rail_graph = _network_to_nx(rail_network)
 
 # Define graph types
-graph_types = {'road': road_graph, 'rail': rail_graph}
+# graph_types = {'road': road_graph, 'rail': rail_graph}
+graph_types = {
+    'graph1': nx.MultiGraph([('A', 'B'), ('B', 'C')]),
+    'graph2': nx.DiGraph([('C', 'D'), ('D', 'F')]),
+    'graph3': nx.MultiDiGraph([('F', 'G'), ('G', 'H')]),
+}
 
 # Create an instance of MultiModalGraph
 multi_modal_graph = MultiModalGraph(od_file_path, graph_types)
+multi_modal_graph = multi_modal_graph.create_multi_modal_graph()
 
 # Access the results for the 'road' graph type
 print("Mapped Multi-Modal ODs for Road Graph:", multi_modal_graph.road_mapped_multi_modal_ods)
