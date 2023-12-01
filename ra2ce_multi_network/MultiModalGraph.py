@@ -1,6 +1,7 @@
 # ToDo: adjust the route finding algorithm to find routes on given graph types: rail, road, all
 import networkx as nx
 import pandas as pd
+import pyproj
 from pathlib import Path
 import geopandas as gpd
 from networkx.classes.multigraph import Graph, MultiGraph
@@ -12,9 +13,14 @@ class MultiModalGraph:
             self,
             od_file: Path,
             graph_types: dict[str, Graph],
+            crs: pyproj.CRS,
+            graphs_to_add_attributes: list = []
     ) -> None:
-        self.multi_modal_graph: Graph = nx.Graph()
-        self.graph_types: dict[str, Graph] = self._update_graph_nodes(graph_types)
+        self.crs = crs
+        self.multi_modal_graph: Graph = nx.Graph(crs=self.crs)
+        if len(graphs_to_add_attributes) > 0:
+            self.graphs_to_add_attributes = graphs_to_add_attributes
+        self.graph_types: dict[str, Graph] = self._update_separate_graphs(graph_types)
         self.od_gdf: GeoDataFrame = gpd.read_file(od_file)
         self.od_multi_modal_ods: set = self._filter_ods()
 
@@ -24,20 +30,43 @@ class MultiModalGraph:
 
         self._find_corresponding_multi_modal_nodes()
 
-    @staticmethod
-    def _update_graph_nodes(g_types: dict):
+    def _update_separate_graphs(self, g_types: dict):
         for g_type, g in g_types.items():
-            node_mapping = {old_node: f'{g_type}_{old_node}' for old_node in g.nodes}
-            g = nx.relabel_nodes(g, node_mapping)
+            g.graph['crs'] = self.crs
+            # Add length, max_speed and time to the edges of the graph_type. User should state which graph_types
+            # should go through this step
+            if hasattr(self, 'graphs_to_add_attributes') and g_type in self.graphs_to_add_attributes:
+                g = self._add_time_speed_attributes(g)
+            g = self._rename_graphs(g_type, g)
             g_types[g_type] = g
-
-            for node, data in g.nodes(data=True):
-                data['node_type'] = g_type
-
-            for u, v, data in g.edges(data=True):
-                data['edge_type'] = g_type
-
         return g_types
+
+    def _add_time_speed_attributes(self, graph: Graph) -> Graph:
+        # Add length, max_speed and time to the edges
+        for u, v, data in graph.edges(data=True):
+            # Check if 'length' is already defined, if not, calculate and assign
+            data.setdefault('length', data['geometry'].length)
+
+            max_speed = pd.to_numeric(data.get('maxspeed', 0), errors='coerce')
+            data.setdefault('max_speed', max_speed if not pd.isna(max_speed) else max_speed.mean())
+
+            data.setdefault('time', data['length'] / data['max_speed'])
+        return graph
+
+    def _rename_graphs(self, graph_type: str, graph: Graph) -> Graph:
+        # Relabel nodes
+        node_mapping = {old_node: f'{graph_type}_{old_node}' for old_node in graph.nodes}
+        graph = nx.relabel_nodes(graph, node_mapping)
+
+        # Add node_type attributes
+        for node, data in graph.nodes(data=True):
+            data['node_type'] = graph_type
+
+        # Add edge_type attributes
+        for u, v, data in graph.edges(data=True):
+            data['edge_type'] = graph_type
+
+        return graph
 
     def _filter_ods(self, attr: str = 'multi_modal_terminal', o_id_column: str = 'o_id', d_id_column: str = 'd_id') \
             -> set:
@@ -142,3 +171,9 @@ class MultiModalGraph:
 
                     if not self.multi_modal_graph.has_edge(other_g_node, node_g):
                         self.multi_modal_graph.add_edge(other_g_node, node_g, **{"edge_type": "terminal"})
+
+    def find_optimal_route_origin_destination(self):
+        # create list of origin-destination pairs
+        od_nodes = self._get_origin_destination_pairs(graph)
+        pref_routes = find_route_ods(graph, od_nodes, analysis["weighing"])
+        return pref_routes

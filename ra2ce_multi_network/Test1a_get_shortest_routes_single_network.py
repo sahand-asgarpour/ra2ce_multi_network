@@ -34,7 +34,6 @@ rail_net.nodes['od_id'] = rail_net.nodes.apply(
     lambda r: f'O_{r.id},D_{r.id}' if r['possible_terminal'] == 1 else str(np.nan), axis=1)
 
 # Add length and time to the edges
-
 rail_net.edges['length'] = rail_net.edges['geometry'].length * 111.32  # length in km
 rail_net.edges['max_speed'] = pd.to_numeric(rail_net.edges['maxspeed'], errors='coerce')
 rail_net.edges.fillna(rail_net.edges.max_speed.mean(), inplace=True)

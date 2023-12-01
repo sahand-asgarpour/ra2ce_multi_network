@@ -1,6 +1,9 @@
 # Example usage
+import pyproj
 from pathlib import Path
 import pickle
+from pyproj import CRS
+
 from ra2ce_multi_network.MultiModalGraph import MultiModalGraph
 import networkx as nx
 from snkit import Network
@@ -34,6 +37,6 @@ graph_types = {'road': road_graph, 'rail': rail_graph}
 # }
 
 # Create an instance of MultiModalGraph
-multi_modal_graph = MultiModalGraph(od_file_path, graph_types)
+multi_modal_graph = MultiModalGraph(od_file_path, graph_types, CRS.from_epsg(4326), ["rail"])
 multi_modal_graph = multi_modal_graph.create_multi_modal_graph()
 a = 1
