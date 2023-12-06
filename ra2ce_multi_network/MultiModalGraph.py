@@ -1,11 +1,29 @@
 # ToDo: adjust the route finding algorithm to find routes on given graph types: rail, road, all
+from typing import Union
+
 import networkx as nx
+import numpy as np
 import pandas as pd
 import pyproj
 from pathlib import Path
 import geopandas as gpd
 from networkx.classes.multigraph import Graph, MultiGraph
 from geopandas.geodataframe import GeoDataFrame
+
+from ra2ce.analyses.analysis_config_data.enums.weighing_enum import WeighingEnum
+from ra2ce.analyses.indirect.analyses_indirect import IndirectAnalyses
+from ra2ce.graph.graph_files.graph_files_collection import GraphFilesCollection
+from ra2ce.graph.network_config_data.network_config_data import NetworkConfigData
+from ra2ce.analyses.analysis_config_data.enums.analysis_direct_enum import AnalysisDirectEnum
+from ra2ce.analyses.analysis_config_data.enums.analysis_indirect_enum import AnalysisIndirectEnum
+from ra2ce.analyses.analysis_config_data.analysis_config_data import (
+    AnalysisConfigData,
+    AnalysisSectionBase,
+    AnalysisSectionDirect,
+    AnalysisSectionIndirect,
+    DirectAnalysisNameList,
+    IndirectAnalysisNameList,
+)
 
 
 class MultiModalGraph:
@@ -14,8 +32,10 @@ class MultiModalGraph:
             od_file: Path,
             graph_types: dict[str, Graph],
             crs: pyproj.CRS,
-            graphs_to_add_attributes: list = []
+            graphs_to_add_attributes=None
     ) -> None:
+        if graphs_to_add_attributes is None:
+            graphs_to_add_attributes = []
         self.crs = crs
         self.multi_modal_graph: Graph = nx.Graph(crs=self.crs)
         if len(graphs_to_add_attributes) > 0:
@@ -43,14 +63,55 @@ class MultiModalGraph:
 
     def _add_time_speed_attributes(self, graph: Graph) -> Graph:
         # Add length, max_speed and time to the edges
+
+        # ToDo: length is meter? use ra2ce function created for conversion
+        def convert_maxspeed(speed: Union[str, list[Union[str, None]]]) -> list[Union[float, None]]:
+            if isinstance(speed, list):
+                return [pd.to_numeric(s, errors='coerce') for s in speed]
+            else:
+                return [pd.to_numeric(speed, errors='coerce')]
+
+        def get_average_max_speed(graph: nx.Graph) -> Union[float, None]:
+            all_max_speeds = []
+
+            for _, _, edge_data in graph.edges(data=True):
+                maxspeed_values = edge_data.get('maxspeed', [None])
+
+                if edge_data.get('maxspeed') is not None:
+                    converted_speeds = convert_maxspeed(maxspeed_values)
+                    non_nan_speeds = [val for val in converted_speeds if not pd.isna(val)]
+
+                    if non_nan_speeds:
+                        all_max_speeds.extend(non_nan_speeds)
+
+            if all_max_speeds:
+                return np.nanmean(all_max_speeds)  # Use np.nanmean to handle NaN values
+            else:
+                return None
+
+        # Calculate the mean of all_max_speeds
+        average_max_speed = get_average_max_speed(graph)
+
+        # Iterate over edges
         for u, v, data in graph.edges(data=True):
             # Check if 'length' is already defined, if not, calculate and assign
+            # ToDo: length is meter? use ra2ce function created for conversion
             data.setdefault('length', data['geometry'].length)
 
-            max_speed = pd.to_numeric(data.get('maxspeed', 0), errors='coerce')
-            data.setdefault('max_speed', max_speed if not pd.isna(max_speed) else max_speed.mean())
+            # Get max_speed as numeric
+            max_speed = pd.to_numeric(data.get('maxspeed', average_max_speed), errors='coerce')
 
-            data.setdefault('time', data['length'] / data['max_speed'])
+            # If max_speed is an array, use np.nanmean to calculate the mean excluding NaN
+            max_speed = np.nanmean(max_speed) if isinstance(max_speed, np.ndarray) else max_speed
+
+            # Replace with average_max_speed if avg_max_speed is None or NaN
+            max_speed = average_max_speed if pd.isna(max_speed) or max_speed is None else max_speed
+
+            # If max_speed is NaN or None, set the default value using the calculated mean
+            data.setdefault('max_speed', max_speed)
+
+            # Calculate and set the 'time' attribute
+            data.setdefault('time', data['length'] / max_speed)
         return graph
 
     def _rename_graphs(self, graph_type: str, graph: Graph) -> Graph:
@@ -167,13 +228,83 @@ class MultiModalGraph:
 
                 for other_g_node in other_g_nodes:
                     if not self.multi_modal_graph.has_edge(node_g, other_g_node):
-                        self.multi_modal_graph.add_edge(node_g, other_g_node, **{"edge_type": "terminal"})
+                        self.multi_modal_graph.add_edge(node_g, other_g_node, **{"edge_type": "terminal",
+                                                                                 "time": 10e-1000,
+                                                                                 "distance": 10e-1000
+                                                                                 })
 
                     if not self.multi_modal_graph.has_edge(other_g_node, node_g):
-                        self.multi_modal_graph.add_edge(other_g_node, node_g, **{"edge_type": "terminal"})
+                        self.multi_modal_graph.add_edge(other_g_node, node_g, **{"edge_type": "terminal",
+                                                                                 "time": 10e-1000,
+                                                                                 "distance": 10e-1000
+                                                                                 })
 
-    def find_optimal_route_origin_destination(self):
-        # create list of origin-destination pairs
-        od_nodes = self._get_origin_destination_pairs(graph)
-        pref_routes = find_route_ods(graph, od_nodes, analysis["weighing"])
-        return pref_routes
+    def _configure_analysis(self, modes: list, project_input: dict, analysis_path: Path) -> dict:
+        accepted_modes = list(self.graph_types.keys()) + ["multi_modal"]
+        config = {}
+        _analyses_config = AnalysisConfigData(
+            root_path=analysis_path,
+            input_path=analysis_path.joinpath(Path("input")),
+            static_path=analysis_path.joinpath(Path("static")),
+            output_path=analysis_path.joinpath(Path("output"))
+        )
+        _analyses_config.analyses = self.get_analysis_sections(project_input)
+        _analyses_config.project.name = project_input["project_name"]
+        for mode in modes:
+            if not mode in accepted_modes:
+                raise ValueError(f"{mode} is not within the accepted modes of {accepted_modes}")
+            mode_analyses_config = _analyses_config
+            mode_analyses = IndirectAnalyses(config=mode_analyses_config, graph_files=GraphFilesCollection())
+            if mode != "multi_modal":
+                mode_analyses.graph_files.origins_destinations_graph = self.graph_types[mode]
+            else:
+                mode_analyses.graph_files.origins_destinations_graph = self.multi_modal_graph
+
+            mode_analyses = IndirectAnalyses(config=mode_analyses_config, graph_files=mode_analyses.graph_files)
+            config[mode] = {
+                "analyses": mode_analyses,
+                "analyses_config": mode_analyses_config
+
+            }
+        return config
+
+    @staticmethod
+    def get_analysis_sections(project_setting: dict) -> list[AnalysisSectionBase]:
+        """
+        based on get_project_section in C:\repos\ra2ce\ra2ce\analyses\analysis_config_data
+        """
+        _analysis_sections = []
+
+        for analysis_setting in project_setting["analysis_settings"]:
+            _analysis_type = analysis_setting["analysis"]
+            print(_analysis_type)
+            if _analysis_type in DirectAnalysisNameList:
+                analysis_setting["analysis"] = AnalysisDirectEnum.get_enum(_analysis_type)
+                _analysis_section = AnalysisSectionDirect(**analysis_setting)
+                raise NotImplementedError("Direct analysis is not implemented yet")
+            elif _analysis_type in IndirectAnalysisNameList:
+                analysis_setting["analysis"] = AnalysisIndirectEnum.get_enum(_analysis_type)
+                if analysis_setting["weighing"] == "distance":
+                    analysis_setting["weighing"] = WeighingEnum.LENGTH
+                else:
+                    analysis_setting["weighing"] = WeighingEnum.get_enum(analysis_setting["weighing"])
+                _analysis_section = AnalysisSectionIndirect(**analysis_setting)
+            else:
+                raise ValueError(f"Analysis {_analysis_type} not supported.")
+            _analysis_sections.append(_analysis_section)
+
+        return _analysis_sections
+
+    def run_analysis(self, modes: list, project_input: dict, analysis_path: Path):
+        _config = self._configure_analysis(modes=modes,
+                                           project_input=project_input,
+                                           analysis_path=analysis_path)
+        for mode, mode_config in _config.items():
+            mode_analyses = mode_config["analyses"]
+            mode_analyses_config = mode_config["analyses_config"]
+            for mode_analysis_config in mode_analyses_config.analyses:
+                func = getattr(mode_analyses, mode_analysis_config.analysis.config_value)
+                result = func(mode_analyses.graph_files.origins_destinations_graph, mode_analysis_config)
+                result = result[~result['geometry'].is_empty]
+                a = 1
+

@@ -6,10 +6,22 @@ from osm_flex.config import *
 import networkx as nx
 
 from ra2ce.analyses.analysis_config_data.analysis_config_data_reader import AnalysisConfigDataReader
+from ra2ce.analyses.analysis_config_data.enums.analysis_direct_enum import AnalysisDirectEnum
+from ra2ce.analyses.analysis_config_data.enums.analysis_indirect_enum import AnalysisIndirectEnum
+from ra2ce.analyses.analysis_config_data.enums.weighing_enum import WeighingEnum
 from ra2ce.analyses.indirect.analyses_indirect import IndirectAnalyses
 from ra2ce.graph.graph_files.graph_files_collection import GraphFilesCollection
 from ra2ce.graph.network_config_data.network_config_data import NetworkConfigData
 from ra2ce_multi_network.simplify_rail import _network_to_nx
+
+from ra2ce.analyses.analysis_config_data.analysis_config_data import (
+    AnalysisConfigData,
+    AnalysisSectionBase,
+    AnalysisSectionDirect,
+    AnalysisSectionIndirect,
+    DirectAnalysisNameList,
+    IndirectAnalysisNameList,
+)
 
 # Defining ini variables
 root_folder = Path(
@@ -17,7 +29,7 @@ root_folder = Path(
     r'C:\Users\asgarpou\osm'
 )
 ## Defining ini variables
-study_area_suffix = '_GR' # small case study area that works: '_ROTTERDAM_PORT'
+study_area_suffix = '_GR'  # small case study area that works: '_ROTTERDAM_PORT'
 clip_output_name = f'study_area{study_area_suffix}'
 rail_net_file = root_folder.joinpath(f'networks/merged_rail_network_{clip_output_name}.geojson')
 analysis_folder = root_folder.joinpath('analysis/Test1a_optimal_rotes_rail')
@@ -57,14 +69,6 @@ od_gdf.to_feather(analysis_folder.joinpath(f'static/output_graph/origin_destinat
 
 # convert rail network to a NetworkX graph
 graph = _network_to_nx(rail_net)
-
-# Setting up the network and analysis config based on ra2ce
-network_config = NetworkConfigData()
-network_config.network.primary_file = graph
-network_config.output_path = root_folder.joinpath(f'output')
-network_config.static_path = root_folder.joinpath(f'static')
-network_config.project.name = 'rail'
-network_config_dict = vars(network_config)
 
 analyses_ini = analysis_folder.joinpath(r'analysis.ini')
 analyses_config = AnalysisConfigDataReader().read(ini_file=analyses_ini)
