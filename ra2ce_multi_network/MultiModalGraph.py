@@ -1,5 +1,5 @@
 # ToDo: adjust the route finding algorithm to find routes on given graph types: rail, road, all
-from typing import Union
+from typing import Union, Any
 
 import networkx as nx
 import numpy as np
@@ -10,6 +10,7 @@ import geopandas as gpd
 from networkx.classes.multigraph import Graph, MultiGraph
 from geopandas.geodataframe import GeoDataFrame
 
+from ra2ce.analyses.indirect.analyses_indirect import save_gdf
 from ra2ce.analyses.analysis_config_data.enums.weighing_enum import WeighingEnum
 from ra2ce.analyses.indirect.analyses_indirect import IndirectAnalyses
 from ra2ce.graph.graph_files.graph_files_collection import GraphFilesCollection
@@ -24,7 +25,6 @@ from ra2ce.analyses.analysis_config_data.analysis_config_data import (
     DirectAnalysisNameList,
     IndirectAnalysisNameList,
 )
-
 
 class MultiModalGraph:
     def __init__(
@@ -306,5 +306,34 @@ class MultiModalGraph:
                 func = getattr(mode_analyses, mode_analysis_config.analysis.config_value)
                 result = func(mode_analyses.graph_files.origins_destinations_graph, mode_analysis_config)
                 result = result[~result['geometry'].is_empty]
+                self._save_results(mode_analyses, result)
                 a = 1
+    @staticmethod
+    def _save_results(analyses: IndirectAnalyses, analysis_results: GeoDataFrame):
+        for analysis in analyses.config.indirect:
+            print(analysis.save_gpkg)
+            # according to origin_closest_destination procedure in
+            # C:\repos\ra2ce\ra2ce\analyses\indirect\analysis_indirect.py
+            if analysis.save_gpkg:
+                # Save the GeoDataFrames
+                save_gdf(analysis_results, to_save_gdf_names)
+            if analysis.save_csv:
+                csv_path = _output_path.joinpath(
+                    analysis.name.replace(" ", "_") + "_destinations.csv"
+                )
+                if "geometry" in destinations.columns:
+                    del destinations["geometry"]
+                if not csv_path.parent.exists():
+                    csv_path.parent.mkdir(parents=True)
+                destinations.to_csv(csv_path, index=False)
+
+                csv_path = _output_path.joinpath(
+                    analysis.name.replace(" ", "_") + "_optimal_routes.csv"
+                )
+                if not opt_routes_without_hazard.empty:
+                    del opt_routes_without_hazard["geometry"]
+                    opt_routes_without_hazard.to_csv(csv_path, index=False)
+                if not opt_routes_with_hazard.empty:
+                    del opt_routes_with_hazard["geometry"]
+                    opt_routes_with_hazard.to_csv(csv_path, index=False)
 
