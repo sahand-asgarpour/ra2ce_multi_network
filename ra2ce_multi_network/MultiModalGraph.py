@@ -26,6 +26,7 @@ from ra2ce.analyses.analysis_config_data.analysis_config_data import (
     IndirectAnalysisNameList,
 )
 
+
 class MultiModalGraph:
     def __init__(
             self,
@@ -306,34 +307,16 @@ class MultiModalGraph:
                 func = getattr(mode_analyses, mode_analysis_config.analysis.config_value)
                 result = func(mode_analyses.graph_files.origins_destinations_graph, mode_analysis_config)
                 result = result[~result['geometry'].is_empty]
-                self._save_results(mode_analyses, result)
-                a = 1
+                self._save_results(mode_analyses, result, analysis_path)
+
     @staticmethod
-    def _save_results(analyses: IndirectAnalyses, analysis_results: GeoDataFrame):
+    def _save_results(analyses: IndirectAnalyses, analysis_results: GeoDataFrame, to_save_path: Path):
+        output_path = to_save_path.joinpath(Path("output"))
         for analysis in analyses.config.indirect:
-            print(analysis.save_gpkg)
+            result_path = output_path.joinpath(Path(analysis.analysis.name.lower()))
             # according to origin_closest_destination procedure in
             # C:\repos\ra2ce\ra2ce\analyses\indirect\analysis_indirect.py
             if analysis.save_gpkg:
-                # Save the GeoDataFrames
-                save_gdf(analysis_results, to_save_gdf_names)
+                save_gdf(analysis_results, Path(str(result_path) + ".gpkg"))
             if analysis.save_csv:
-                csv_path = _output_path.joinpath(
-                    analysis.name.replace(" ", "_") + "_destinations.csv"
-                )
-                if "geometry" in destinations.columns:
-                    del destinations["geometry"]
-                if not csv_path.parent.exists():
-                    csv_path.parent.mkdir(parents=True)
-                destinations.to_csv(csv_path, index=False)
-
-                csv_path = _output_path.joinpath(
-                    analysis.name.replace(" ", "_") + "_optimal_routes.csv"
-                )
-                if not opt_routes_without_hazard.empty:
-                    del opt_routes_without_hazard["geometry"]
-                    opt_routes_without_hazard.to_csv(csv_path, index=False)
-                if not opt_routes_with_hazard.empty:
-                    del opt_routes_with_hazard["geometry"]
-                    opt_routes_with_hazard.to_csv(csv_path, index=False)
-
+                analysis_results.to_csv(Path(str(result_path) + ".gpkg"), index=False)
