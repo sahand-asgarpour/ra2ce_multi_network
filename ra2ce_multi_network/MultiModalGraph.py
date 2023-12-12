@@ -307,16 +307,16 @@ class MultiModalGraph:
                 func = getattr(mode_analyses, mode_analysis_config.analysis.config_value)
                 result = func(mode_analyses.graph_files.origins_destinations_graph, mode_analysis_config)
                 result = result[~result['geometry'].is_empty]
-                self._save_results(mode_analyses, result, analysis_path)
+                self._save_results(mode, mode_analyses, result, analysis_path)
 
     @staticmethod
-    def _save_results(analyses: IndirectAnalyses, analysis_results: GeoDataFrame, to_save_path: Path):
+    def _save_results(mode: str, analyses: IndirectAnalyses, analysis_results: GeoDataFrame, to_save_path: Path):
         output_path = to_save_path.joinpath(Path("output"))
         for analysis in analyses.config.indirect:
-            result_path = output_path.joinpath(Path(analysis.analysis.name.lower()))
+            result_path = output_path.joinpath(Path(mode + "_" + analysis.analysis.name.lower()))
             # according to origin_closest_destination procedure in
             # C:\repos\ra2ce\ra2ce\analyses\indirect\analysis_indirect.py
             if analysis.save_gpkg:
                 save_gdf(analysis_results, Path(str(result_path) + ".gpkg"))
             if analysis.save_csv:
-                analysis_results.to_csv(Path(str(result_path) + ".gpkg"), index=False)
+                analysis_results.to_csv(Path(str(result_path) + ".csv"), index=False)

@@ -82,9 +82,11 @@ def _nx_to_network(g: Union[MultiGraph, MultiDiGraph], node_id_column_name='id',
 
     node_attributes = [{node_id_column_name: node, **data} for node, data in g.nodes(data=True)]
     network.nodes = gpd.GeoDataFrame(node_attributes)
+    network.nodes.set_geometry('geometry', inplace=True)
 
     edge_attributes = [{edge_from_id_column: u, edge_to_id_column: v, **data} for u, v, data in g.edges(data=True)]
     network.edges = gpd.GeoDataFrame(edge_attributes)
+    network.edges.set_geometry('geometry', inplace=True)
 
     return network
 
@@ -683,7 +685,8 @@ def _get_intersections(_edge, _edges):
                     intersection.intersects(boundary) for boundary in edge_geometry.boundary.geoms):
                 if isinstance(intersection, MultiPoint):
                     intersections.extend(
-                        [point.coords[0] for point in intersection.geoms if point in other_edge_geometry.boundary.geoms])
+                        [point.coords[0] for point in intersection.geoms if
+                         point in other_edge_geometry.boundary.geoms])
                 else:
                     intersections.append(intersection.coords[0])
 
