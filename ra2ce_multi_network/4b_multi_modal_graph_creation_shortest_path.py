@@ -1,12 +1,12 @@
+import networkx as nx
 from pathlib import Path
 import pickle
 from pyproj import CRS
-
 from ra2ce_multi_network.MultiModalGraph import MultiModalGraph
 import geopandas as gpd
 from ra2ce_multi_network.simplify_rail import _nx_to_network, _network_to_nx
 
-scenario = 'scenario_1'
+scenario = 'scenario_2'
 root_folder = Path(
     rf'C:\Users\asgarpou\OneDrive - Stichting Deltares\Documents\Projects\Long involvement\SITO_Netwerk to system\project_files\multi_network_{scenario}')
 od_file_path = root_folder.joinpath('static/network/od_nodes.geojson')
