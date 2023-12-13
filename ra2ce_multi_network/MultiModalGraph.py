@@ -1,4 +1,8 @@
 # ToDo: adjust the route finding algorithm to find routes on given graph types: rail, road, all
+import pickle
+
+import os
+
 from typing import Union, Any
 
 import networkx as nx
@@ -7,14 +11,15 @@ import pandas as pd
 import pyproj
 from pathlib import Path
 import geopandas as gpd
-from networkx.classes.multigraph import Graph, MultiGraph
+from networkx.classes.multigraph import Graph
 from geopandas.geodataframe import GeoDataFrame
 
 from ra2ce.analyses.indirect.analyses_indirect import save_gdf
 from ra2ce.analyses.analysis_config_data.enums.weighing_enum import WeighingEnum
 from ra2ce.analyses.indirect.analyses_indirect import IndirectAnalyses
+from ra2ce.graph.exporters.multi_graph_network_exporter import MultiGraphNetworkExporter
 from ra2ce.graph.graph_files.graph_files_collection import GraphFilesCollection
-from ra2ce.graph.network_config_data.network_config_data import NetworkConfigData
+from ra2ce.graph.origins_destinations import add_od_nodes
 from ra2ce.analyses.analysis_config_data.enums.analysis_direct_enum import AnalysisDirectEnum
 from ra2ce.analyses.analysis_config_data.enums.analysis_indirect_enum import AnalysisIndirectEnum
 from ra2ce.analyses.analysis_config_data.analysis_config_data import (
@@ -26,6 +31,10 @@ from ra2ce.analyses.analysis_config_data.analysis_config_data import (
     IndirectAnalysisNameList,
 )
 
+valid_modes = ['rail', 'road']
+valid_multi_modal_forms = ['multimodal', 'multi-modal', 'multi_modal', 'multi.modal']
+all_valid_modes = valid_modes + valid_multi_modal_forms
+
 
 class MultiModalGraph:
     def __init__(
@@ -33,16 +42,18 @@ class MultiModalGraph:
             od_file: Path,
             graph_types: dict[str, Graph],
             crs: pyproj.CRS,
-            graphs_to_add_attributes=None
+            graphs_to_add_attributes=None,
+            map_od: bool = False
     ) -> None:
         if graphs_to_add_attributes is None:
             graphs_to_add_attributes = []
         self.crs = crs
+        self.od_gdf: GeoDataFrame = gpd.read_file(od_file)
+        self.analysis_folder = od_file.parents[2]
         self.multi_modal_graph: Graph = nx.Graph(crs=self.crs)
         if len(graphs_to_add_attributes) > 0:
             self.graphs_to_add_attributes = graphs_to_add_attributes
-        self.graph_types: dict[str, Graph] = self._update_separate_graphs(graph_types)
-        self.od_gdf: GeoDataFrame = gpd.read_file(od_file)
+        self.graph_types: dict[str, Graph] = self._update_separate_graphs(graph_types, map_od)
         self.od_multi_modal_ods: set = self._filter_ods()
 
         # Dynamically create attributes for mapped ods based on graph types
@@ -51,7 +62,11 @@ class MultiModalGraph:
 
         self._find_corresponding_multi_modal_nodes()
 
-    def _update_separate_graphs(self, g_types: dict):
+    def _update_separate_graphs(self, g_types: dict, map_od: bool):
+        # maps ods to the graphs, based on the given attribute values for modes in the od table (use input)
+        if map_od:
+            self._map_od(g_types)
+
         for g_type, g in g_types.items():
             g.graph['crs'] = self.crs
             # Add length, max_speed and time to the edges of the graph_type. User should state which graph_types
@@ -62,7 +77,62 @@ class MultiModalGraph:
             g_types[g_type] = g
         return g_types
 
-    def _add_time_speed_attributes(self, graph: Graph) -> Graph:
+    def _map_od(self, graph_types: dict):
+        self._check_modes(self.od_gdf)
+        for graph_type in graph_types:
+            relevant_modes = valid_multi_modal_forms + [graph_type]
+            to_map_ods = self.od_gdf[
+                self.od_gdf['modes'].apply(lambda modes: any(mode in modes for mode in relevant_modes))
+            ]
+            graph = graph_types[graph_type]
+            output_dir = self.analysis_folder.joinpath('static/output_graph')
+
+            # Check and skip OD-mapping if files exist
+            if not self._od_mapping_performed(graph_type, output_dir):
+                # Perform OD-mapping
+                od_mapped_graph = add_od_nodes(od=to_map_ods, graph=graph, crs=self.crs)[1]
+                graph_types[graph_type] = od_mapped_graph
+                self._save_graphs(graph_type, od_mapped_graph, self.analysis_folder.joinpath('static/output_graph'))
+            else:
+                od_mapped_graph_path = self.analysis_folder.joinpath(
+                    f'static/output_graph/{graph_type}_graph_od_mapped.p')
+                with open(od_mapped_graph_path, 'rb') as od_mapped_graph_file:
+                    od_mapped_graph = pickle.load(od_mapped_graph_file)
+                graph_types[graph_type] = od_mapped_graph
+
+    @staticmethod
+    def _check_modes(od_gdf: GeoDataFrame):
+        for value in od_gdf['modes']:
+            lowercase_value = value.lower()
+
+            if lowercase_value == 'waterway':
+                raise NotImplementedError(f"Mode 'waterway' is not implemented.")
+            elif lowercase_value not in all_valid_modes:
+                raise ValueError(f"Invalid mode: {value}. Modes should be one of {all_valid_modes}")
+
+    @staticmethod
+    def _od_mapping_performed(graph_type: str, output_dir: Path) -> bool:
+        # Check if the OD-mapped graph files already exist
+        pickle_file = os.path.join(output_dir, f'{graph_type}_graph_od_mapped.p')
+        nodes_gpkg_file = os.path.join(output_dir, f'{graph_type}_graph_od_mapped_nodes.gpkg')
+        edges_gpkg_file = os.path.join(output_dir, f'{graph_type}_graph_od_mapped_edges.gpkg')
+
+        if os.path.exists(pickle_file) and os.path.exists(nodes_gpkg_file) and os.path.exists(edges_gpkg_file):
+            print(f"OD-mapped graphs for '{graph_type}' already exist. Skipping OD-mapping.")
+            return True
+
+        return False
+
+    @staticmethod
+    def _save_graphs(graph_type: str, graph: nx.Graph, output_folder: Path):
+        graph_exporter = MultiGraphNetworkExporter(
+            basename=f'{graph_type}_graph_od_mapped',
+            export_types=['pickle', 'gpkg'])
+        graph_exporter.export_to_gpkg(output_dir=output_folder, export_data=graph)
+        graph_exporter.export_to_pickle(output_dir=output_folder, export_data=graph)
+
+    @staticmethod
+    def _add_time_speed_attributes(graph: Graph) -> Graph:
         # Add length, max_speed and time to the edges
 
         # ToDo: length is meter? use ra2ce function created for conversion
@@ -130,10 +200,10 @@ class MultiModalGraph:
 
         return graph
 
-    def _filter_ods(self, attr: str = 'multi_modal_terminal', o_id_column: str = 'o_id', d_id_column: str = 'd_id') \
+    def _filter_ods(self, attr: str = 'modes', o_id_column: str = 'o_id', d_id_column: str = 'd_id') \
             -> set:
         _filtered_ods: set = set()
-        for _, row in self.od_gdf[self.od_gdf[attr] == 1].iterrows():
+        for _, row in self.od_gdf[self.od_gdf[attr].isin(valid_multi_modal_forms)].iterrows():
             _filtered_ods.add(row[o_id_column])
             _filtered_ods.add(row[d_id_column])
         return _filtered_ods
@@ -163,6 +233,7 @@ class MultiModalGraph:
         # Store the results based on the specified graph type
         setattr(self, f'{graph_type}_mapped_multi_modal_ods', mapped_multi_modal_ods)
         setattr(self, f'{graph_type}_mapped_single_modal_ods', mapped_single_modal_ods)
+        setattr(self, f'{graph_type}_mapped_ods', {**mapped_multi_modal_ods, **mapped_single_modal_ods})
 
     def _filter_mapped_ods(
             self,
@@ -202,7 +273,6 @@ class MultiModalGraph:
             setattr(self, f'{g_type}_corresponding_multi_modal_ods', corresponding_multi_modal_ods)
 
     def create_multi_modal_graph(self):
-        graph_types = self.graph_types.values()
         self.multi_modal_graph = self._join_graphs()
         self._connect_joined_graphs_graphs()
         return self.multi_modal_graph
@@ -230,8 +300,8 @@ class MultiModalGraph:
                 for other_g_node in other_g_nodes:
                     if not self.multi_modal_graph.has_edge(node_g, other_g_node):
                         self.multi_modal_graph.add_edge(node_g, other_g_node, **{"edge_type": "terminal",
-                                                                                 "time": 10e-1000,
-                                                                                 "distance": 10e-1000
+                                                                                 "time": 10e-10,
+                                                                                 "distance": 10e-10
                                                                                  })
 
                     if not self.multi_modal_graph.has_edge(other_g_node, node_g):
@@ -278,7 +348,6 @@ class MultiModalGraph:
 
         for analysis_setting in project_setting["analysis_settings"]:
             _analysis_type = analysis_setting["analysis"]
-            print(_analysis_type)
             if _analysis_type in DirectAnalysisNameList:
                 analysis_setting["analysis"] = AnalysisDirectEnum.get_enum(_analysis_type)
                 _analysis_section = AnalysisSectionDirect(**analysis_setting)
@@ -296,16 +365,23 @@ class MultiModalGraph:
 
         return _analysis_sections
 
-    def run_analysis(self, modes: list, project_input: dict, analysis_path: Path):
+    def run_analysis(self, modes: list, project_input: dict, analysis_path: Path = None):
+        if not analysis_path:
+            analysis_path = self.analysis_folder
         _config = self._configure_analysis(modes=modes,
                                            project_input=project_input,
                                            analysis_path=analysis_path)
         for mode, mode_config in _config.items():
             mode_analyses = mode_config["analyses"]
             mode_analyses_config = mode_config["analyses_config"]
+            if mode != "multi_modal":
+                mode_mapped_ods: dict = getattr(self, f'{mode}_mapped_ods')
+            else:
+                mode_mapped_ods=None
             for mode_analysis_config in mode_analyses_config.analyses:
                 func = getattr(mode_analyses, mode_analysis_config.analysis.config_value)
-                result = func(mode_analyses.graph_files.origins_destinations_graph, mode_analysis_config)
+                result = func(mode_analyses.graph_files.origins_destinations_graph, mode_analysis_config,
+                              mode_mapped_ods)
                 result = result[~result['geometry'].is_empty]
                 self._save_results(mode, mode_analyses, result, analysis_path)
 

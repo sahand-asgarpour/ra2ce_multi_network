@@ -41,9 +41,9 @@ config_data.network = NetworkSection(
     road_types=[RoadTypeEnum.get_enum(road_type) for road_type in road_types],
     polygon=polygon_path
 )
-
-# Download the graph from osm and save
 osm_network_wrapper = OsmNetworkWrapper(config_data=config_data)
+
+# ---------------------------------------------------------------------------------Download the graph from osm and save
 complex_graph = osm_network_wrapper.get_clean_graph_from_osm()
 complex_graph.graph["crs"] = pyproj.CRS("EPSG:4326")
 
@@ -61,15 +61,15 @@ complex_graph_exporter.export_to_gpkg(output_dir=root_folder.joinpath(f'static/o
 complex_graph_exporter.export_to_pickle(output_dir=root_folder.joinpath(f'static/output_graph'),
                                         export_data=complex_graph)
 
-## load complex_graph
+# # load complex_graph
 # with open(root_folder.joinpath(
 #         f'static/output_graph/road_complex_graph_od_mapped_{output_name}.p'), 'rb') as f:
 #     complex_graph = pickle.load(f)
-# Map origin-destinations and save
 
 if not isinstance(complex_graph, MultiDiGraph):
     complex_graph = MultiDiGraph(complex_graph)
 
+# ------------------------------------------------------------------------------------simplify and save
 
 # Simplify complex graph => get_network procedure
 simple_graph, complex_graph, link_tables = nut.create_simplified_graph(complex_graph)
@@ -85,28 +85,39 @@ simple_graph = nut.add_missing_geoms_graph(simple_graph, geom_name="geometry")
 simple_graph.graph["crs"] = pyproj.CRS("EPSG:4326")
 # simple_graph = osm_network_wrapper._get_avg_speed(simple_graph)
 
-# Map Origin destinations to the complex and simple graphs
-od_gdf = gpd.read_file(od_file)
-# od_gdf, complex_graph = add_od_nodes(od=gpd.read_file(od_file), graph=complex_graph, crs=pyproj.CRS("EPSG:4326"))
-simple_graph = add_od_nodes(od=gpd.read_file(od_file), graph=simple_graph, crs=pyproj.CRS("EPSG:4326"))[1]
-
-# Save the complex and simple graphs as snkit.Network and geojson
-
-od_gdf.to_file(od_file, driver="GeoJSON")
-
-# # load simple graph
-# with open(root_folder.joinpath(
-#         f'static/output_graph/road_simple_graph_od_mapped_{output_name}.p'), 'rb') as f:
-#     simple_graph = pickle.load(f)
-# simple_graph.graph["crs"] = pyproj.CRS("EPSG:4326")
-
+#  save simple graph
 simple_graph_exporter = MultiGraphNetworkExporter(
-    basename=f'road_simple_graph_od_mapped_{output_name}',
+    basename=f'road_simple_graph_{output_name}',
     export_types=['pickle', 'gpkg'])
 simple_graph_exporter.export_to_gpkg(output_dir=root_folder.joinpath(f'static/output_graph'),
                                      export_data=simple_graph)
 simple_graph_exporter.export_to_pickle(output_dir=root_folder.joinpath(f'static/output_graph'),
                                        export_data=simple_graph)
 
+# -------------------------------------------------------------Map Origin destinations to the complex and simple graphs
+
+# od_gdf = gpd.read_file(od_file)
+# # od_gdf, complex_graph = add_od_nodes(od=gpd.read_file(od_file), graph=complex_graph, crs=pyproj.CRS("EPSG:4326"))
+# simple_graph_od_mapped = add_od_nodes(od=gpd.read_file(od_file), graph=simple_graph, crs=pyproj.CRS("EPSG:4326"))[1]
+#
+# # Save the complex and simple graphs as snkit.Network and geojson
+#
+# od_gdf.to_file(od_file, driver="GeoJSON")
+#
+# # # load simple graph
+# # with open(root_folder.joinpath(
+# #         f'static/output_graph/road_simple_graph_od_mapped_{output_name}.p'), 'rb') as f:
+# #     simple_graph = pickle.load(f)
+# # simple_graph.graph["crs"] = pyproj.CRS("EPSG:4326")
+#
+#
+# #  save simple graph od_mapped
+# simple_graph_od_mapped_exporter = MultiGraphNetworkExporter(
+#     basename=f'road_simple_graph_od_mapped_{output_name}',
+#     export_types=['pickle', 'gpkg'])
+# simple_graph_od_mapped_exporter.export_to_gpkg(output_dir=root_folder.joinpath(f'static/output_graph'),
+#                                                export_data=simple_graph_od_mapped)
+# simple_graph_od_mapped_exporter.export_to_pickle(output_dir=root_folder.joinpath(f'static/output_graph'),
+#                                                  export_data=simple_graph_od_mapped)
 
 a = 1

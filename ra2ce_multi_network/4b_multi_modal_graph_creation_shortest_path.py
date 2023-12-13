@@ -17,15 +17,13 @@ od_gdf['flow'] = [i * 10 for i in range(1, len(od_gdf) + 1)]  # optional at this
 
 od_gdf.to_feather(root_folder.joinpath(f'static/output_graph/origin_destination_table.feather'))
 
-# Create a MultiGraph for testing (replace this with your actual graph creation logic)
-with open(root_folder.joinpath(f'static/output_graph/road_simple_graph_od_mapped_study_area_GR.p'), 'rb') as road_f:
+# load merged and simplified rail and road graphs
+with open(root_folder.joinpath(f'static/output_graph/road_simple_graph_study_area_GR.p'), 'rb') as road_f:
     road_graph = pickle.load(road_f)
 
-with open(root_folder.joinpath(f'static/output_graph/merged_rail_network_od_mapped_study_area_GR.p'),
+with open(root_folder.joinpath(f'static/output_graph/merged_rail_network_study_area_GR.p'),
           'rb') as rail_f:
-    rail_network = pickle.load(rail_f)
-
-rail_graph = _network_to_nx(rail_network)
+    rail_graph = pickle.load(rail_f)
 
 # Define graph types (origin destination mapped (necessary), and simplified (optional)).
 graph_types = {'road': road_graph, 'rail': rail_graph}
@@ -53,10 +51,8 @@ project_input = {
 # }
 
 # Create an instance of MultiModalGraph and run the optimal route analysis
-multi_modal_object = MultiModalGraph(od_file_path, graph_types, CRS.from_epsg(4326),
+multi_modal_object = MultiModalGraph(od_file_path, graph_types, CRS.from_epsg(4326), map_od=True,
                                      graphs_to_add_attributes=["rail", "road"])
 multi_modal_graph = multi_modal_object.create_multi_modal_graph()
-config = multi_modal_object.run_analysis(modes=['rail', 'road', 'multi_modal'], project_input=project_input,
-                                         analysis_path=root_folder)
-
-a = 1
+config = multi_modal_object.run_analysis(
+    modes=['rail', 'road', 'multi_modal'], project_input=project_input, analysis_path=root_folder)

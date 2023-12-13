@@ -7,8 +7,8 @@ from geopandas import GeoSeries
 from networkx import MultiDiGraph, Graph, MultiGraph
 from pandas import Index
 from shapely import Polygon, MultiPolygon, MultiLineString
-from typing import Union, List
-
+from typing import Union, List, Optional
+from pyproj import CRS
 import geopandas as gpd
 import pandas as pd
 import snkit.network
@@ -61,23 +61,33 @@ def _make_network_from_gdf(network_gdf: gpd.GeoDataFrame) -> snkit.network.Netwo
 
 
 def _network_to_nx(net: snkit.network.Network, node_id_column_name='id',
-                   edge_from_id_column='from_id', edge_to_id_column='to_id') -> MultiGraph:
+                   edge_from_id_column='from_id', edge_to_id_column='to_id',
+                   default_crs: Optional[CRS] = CRS.from_epsg(4326)) -> MultiGraph:
     g = nx.MultiGraph()
+
+    # Add nodes to the graph
     for index, row in net.nodes.iterrows():
         node_id = row[node_id_column_name]
         attributes = {k: v for k, v in row.items()}
         g.add_node(node_id, **attributes)
 
+    # Add edges to the graph
     for index, row in net.edges.iterrows():
         u = row[edge_from_id_column]
         v = row[edge_to_id_column]
         attributes = {k: v for k, v in row.items()}
         g.add_edge(u, v, **attributes)
+
+    # Add CRS information to the graph
+    if 'crs' not in g.graph:
+        g.graph['crs'] = default_crs
+
     return g
 
 
 def _nx_to_network(g: Union[MultiGraph, MultiDiGraph], node_id_column_name='id',
-                   edge_from_id_column='from_id', edge_to_id_column='to_id') -> snkit.network.Network:
+                   edge_from_id_column='from_id', edge_to_id_column='to_id',
+                   default_crs: CRS = CRS.from_epsg(4326)) -> snkit.network.Network:
     network = snkit.network.Network()
 
     node_attributes = [{node_id_column_name: node, **data} for node, data in g.nodes(data=True)]
@@ -87,6 +97,9 @@ def _nx_to_network(g: Union[MultiGraph, MultiDiGraph], node_id_column_name='id',
     edge_attributes = [{edge_from_id_column: u, edge_to_id_column: v, **data} for u, v, data in g.edges(data=True)]
     network.edges = gpd.GeoDataFrame(edge_attributes)
     network.edges.set_geometry('geometry', inplace=True)
+
+    # Set network CRS to default_crs
+    network.set_crs(default_crs)
 
     return network
 
