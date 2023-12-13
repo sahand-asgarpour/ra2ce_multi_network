@@ -18,9 +18,12 @@ from ra2ce_multi_network.simplify_rail import _nx_to_network, _network_to_nx
 import ra2ce.graph.networks_utils as nut
 
 # Defining ini variables
+scenario = 'scenario_1'
+
 root_folder = Path(
     # r'C:\Users\asgarpou\OneDrive - Stichting Deltares\Documents\Projects\Long involvement\SITO_Netwerk to system\project_files\get_shortest_routes_road'
-    r'C:\Users\asgarpou\OneDrive - Stichting Deltares\Documents\Projects\Long involvement\SITO_Netwerk to system\project_files\multi_network')
+    rf'C:\Users\asgarpou\OneDrive - Stichting Deltares\Documents\Projects\Long involvement\SITO_Netwerk to system\project_files\multi_network_{scenario}'
+)
 study_area_suffix = '_GR'
 output_name = f'study_area{study_area_suffix}'
 polygon_path = root_folder.joinpath(f'static/network/polygon{study_area_suffix}.geojson')

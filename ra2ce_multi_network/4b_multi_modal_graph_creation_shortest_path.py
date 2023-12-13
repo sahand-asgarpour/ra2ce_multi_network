@@ -6,8 +6,9 @@ from ra2ce_multi_network.MultiModalGraph import MultiModalGraph
 import geopandas as gpd
 from ra2ce_multi_network.simplify_rail import _nx_to_network, _network_to_nx
 
+scenario = 'scenario_1'
 root_folder = Path(
-    r'C:\Users\asgarpou\OneDrive - Stichting Deltares\Documents\Projects\Long involvement\SITO_Netwerk to system\project_files\multi_network')
+    rf'C:\Users\asgarpou\OneDrive - Stichting Deltares\Documents\Projects\Long involvement\SITO_Netwerk to system\project_files\multi_network_{scenario}')
 od_file_path = root_folder.joinpath('static/network/od_nodes.geojson')
 
 # od_table is made and saved based on the ra2ce expected attributes (names and structure)
