@@ -28,7 +28,7 @@ complex_rail_network = Network(
     )
 
 # # Merge the railway network: merge edges
-# merged_rail_network = _merge_edges(complex_rail_network, excluded_edge_types=['bridge', 'tunnel'])
+# merged_rail_network = _merge_edges(excluded_edge_types=['bridge', 'tunnel'], network=complex_rail_network)
 
 # load an earlier merged network
 merged_rail_network_file = root_folder.joinpath(f'static/output_graph/merged_rail_network_{output_name}.geojson')

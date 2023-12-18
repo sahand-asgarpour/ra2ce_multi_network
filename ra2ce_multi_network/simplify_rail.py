@@ -85,7 +85,7 @@ def _network_to_nx(net: snkit.network.Network, node_id_column_name='id',
     return g
 
 
-def _nx_to_network(g: Union[MultiGraph, MultiDiGraph], node_id_column_name='id',
+def _nx_to_network(g: Union[Graph, MultiGraph, MultiDiGraph], node_id_column_name='id',
                    edge_from_id_column='from_id', edge_to_id_column='to_id',
                    default_crs: CRS = CRS.from_epsg(4326)) -> snkit.network.Network:
     network = snkit.network.Network()
@@ -356,13 +356,19 @@ def _check_terminal_criteria(from_node_id: int, to_node_id: int, edge_property: 
 
 
 def simplify_rail(network: snkit.network.Network) -> snkit.network.Network:
-    network = _merge_edges(network, excluded_edge_types=['bridge', 'tunnel'])
+    network = _merge_edges(excluded_edge_types=['bridge', 'tunnel'], network=network)
     network = _simplify_tracks(network, 0.012, 0.01)
     return network
 
 
-def _merge_edges(network: snkit.network.Network, excluded_edge_types: List[str]) -> snkit.network.Network:
+def _merge_edges(excluded_edge_types: List[str], network: snkit.network.Network = None, graph: Graph = None) \
+        -> snkit.network.Network:
     # _merge_edges starts here. add the degree column to nodes and put it high for the excluded_edge_types objects
+    if (not network) and (not graph):
+        raise ValueError("a network or graph should be introduced")
+    if graph and (not network):
+        network = _nx_to_network(graph)
+
     network = _get_nodes_degree(network)
     # merge_edges
     cols = [col for col in network.edges.columns if col != 'geometry']
