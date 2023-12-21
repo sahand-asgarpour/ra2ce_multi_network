@@ -272,9 +272,9 @@ class MultiModalGraph:
                 }
             setattr(self, f'{g_type}_corresponding_multi_modal_ods', corresponding_multi_modal_ods)
 
-    def create_multi_modal_graph(self):
+    def create_multi_modal_graph(self, connector_weights=None):
         self.multi_modal_graph = self._join_graphs()
-        self._connect_joined_graphs_graphs()
+        self._connect_joined_graphs_graphs(connector_weights)
         return self.multi_modal_graph
 
     def _join_graphs(self) -> Graph:
@@ -290,8 +290,10 @@ class MultiModalGraph:
 
         return joined_g
 
-    def _connect_joined_graphs_graphs(self):
+    def _connect_joined_graphs_graphs(self, connector_weights=None):
         #  add bidirectional virtual edges between multi_modal terminals
+        if not connector_weights:
+            connector_weights = 10e-10
         for g_type in self.graph_types:
             for node_g, corresponding_multi_modal_ods_data in (
                     getattr(self, f'{g_type}_corresponding_multi_modal_ods').items()):
@@ -300,14 +302,14 @@ class MultiModalGraph:
                 for other_g_node in other_g_nodes:
                     if not self.multi_modal_graph.has_edge(node_g, other_g_node):
                         self.multi_modal_graph.add_edge(node_g, other_g_node, **{"edge_type": "terminal",
-                                                                                 "time": 10e-10,
-                                                                                 "distance": 10e-10
+                                                                                 "time": connector_weights,
+                                                                                 "distance": connector_weights
                                                                                  })
 
                     if not self.multi_modal_graph.has_edge(other_g_node, node_g):
                         self.multi_modal_graph.add_edge(other_g_node, node_g, **{"edge_type": "terminal",
-                                                                                 "time": 10e-1000,
-                                                                                 "distance": 10e-1000
+                                                                                 "time": connector_weights,
+                                                                                 "distance": connector_weights
                                                                                  })
 
     def _configure_analysis(self, modes: list, project_input: dict, analysis_path: Path) -> dict:
