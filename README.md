@@ -1,0 +1,1 @@
+The presented package aims to build upon the existing Python package RA2CE (Deltares/ra2ce, Resilience Assessment and Action perspective for Critical infrastructurE) used for the road network and extend its functionalities to be used for assessing the resilience of multi-modal transport networks. 
