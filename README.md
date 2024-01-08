@@ -7,10 +7,10 @@ The most important packages used are:
 
 - snkit: https://github.com/tomalrussell/snkit
 
-- RA2CE (Resilience Assessment and Action perspective for Critical infrastructurE): Focuses on mapping the exposure, criticality, and vulnerability as well as the forthcoming prioritisation of locations to take actions based on cost-benefit assessment. ra2ce_multi_modal_network uses a branch of RA2CE called chore/185-ra2cemulti-modal. (https://github.com/Deltares/ra2ce)
+- RA2CE (Resilience Assessment and Action perspective for Critical infrastructurE): Focuses on mapping the exposure, criticality, and vulnerability as well as the forthcoming prioritisation of locations to take actions based on cost-benefit assessment. ra2ce_multi_modal_network uses a branch of RA2CE called chore/185-ra2ce-multi. (https://github.com/Deltares/ra2ce)
 
 # Installation
-1. Clone the rpository:
+1. Clone the repository:
 
 ```
 git clone https://github.com/sahand-asgarpour/ra2ce_multi_network.git
@@ -27,7 +27,7 @@ conda activate ra2ce_multi_env
 4. For updating the Trail package, Clone and place the Trail's src folder in the ra2ce_multi|_network folder, and then import accordingly in .py files.
 
 # Overview of the main features
-The following features (using the mentioned packages, modified, or developed here) are availabale:
+The following features (using the mentioned packages, modified, or developed here) are available:
 
 1. A rail network for a specific transport purpose (e.g., freight) can be created and simplified for the region of interest. The railway network simplification includes the following:
 - Dropping hanging nodes.
