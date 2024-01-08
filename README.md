@@ -41,5 +41,5 @@ The following features (using the mentioned packages, modified, or developed her
 
 4. After creating a multi-modal object (from the MultiModal class), it is possible to explore the optimal routes among origins and destinations through the introduced graphs (rail and road) as well as the multi-modal graph. The shortest path is calculated using transport time or distance (weights). The optimal route finding is connected to the RA2Ce package for the future integration of the ra2ce_multi_modal_network and RA2CE
 
-In the examples folder, examples are provided for the mentioned features.
+In the [examples](https://github.com/sahand-asgarpour/ra2ce_multi_network/tree/master/ra2ce_multi_network/examples) folder, examples are provided for the mentioned features.
 
