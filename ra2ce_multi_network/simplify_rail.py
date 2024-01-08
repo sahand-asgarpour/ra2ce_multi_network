@@ -784,17 +784,14 @@ def _get_edge_paths(node_set: set, net: snkit.network.Network) -> list:
     return edge_paths
 
 
-def _simplify_tracks(net: snkit.network.Network, buffer_distance: float, hole_area_threshold: float) -> \
-        snkit.network.Network:
+def _simplify_tracks(net: snkit.network.Network, buffer_distance: float, hole_area_threshold: float):
     net = _drop_hanging_nodes(net)
     unified_buffer_gdf = _unified_buffer_tracks(net, buffer_distance)
     unified_buffer_gdf = get_largest_polygon(unified_buffer_gdf)
     unified_buffer_gdf = _remove_small_holes(unified_buffer_gdf, hole_area_threshold)
     triangulation_data = _triangulate_polygon(unified_buffer_gdf)
-    # with open(r'C:\Users\asgarpou\osm\networks\triangulation_data.pickle', 'wb') as handle:
-    #     pickle.dump(triangulation_data, handle)
     triangles_gdf = _create_triangle_gdf(triangulation_data, unified_buffer_gdf)
-    return net
+    raise NotImplementedError()
 
 
 def _drop_hanging_nodes(net, tolerance=1):
