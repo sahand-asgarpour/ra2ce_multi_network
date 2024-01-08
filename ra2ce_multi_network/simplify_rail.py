@@ -16,7 +16,7 @@ import snkit.network
 from snkit.network import *
 
 from ra2ce.graph.origins_destinations import add_od_nodes
-from trails import *
+from ra2ce_multi_network.trails import *
 
 
 def get_rail_network_with_terminals(network_gdf: gpd.GeoDataFrame, aggregation_range: float) -> snkit.network.Network:
