@@ -12,14 +12,17 @@ The most important packages used are:
 # Installation
 1. Clone the rpository:
 
-    git clone https://github.com/sahand-asgarpour/ra2ce_multi_network.git
+```
+git clone https://github.com/sahand-asgarpour/ra2ce_multi_network.git
+```
 
 2. Create the ra2ce_multi_env:
 
-    cd <to the main repository RA2CE folder>
-    conda env create -f .config\environment.yml
-    conda activate ra2ce_multi_env
-
+```
+cd <to the main repository RA2CE folder>
+conda env create -f .config\environment.yml
+conda activate ra2ce_multi_env
+```
 3. Manually download binaries from https://wiki.openstreetmap.org/wiki/Osmconvert#Windows . Then rename it to osmconvert.exe. Then place the .exe in the osm folder created by osm_flex during the installation.
 4. For updating the Trail package, Clone and place the Trail's src folder in the ra2ce_multi|_network folder, and then import accordingly in .py files.
 
