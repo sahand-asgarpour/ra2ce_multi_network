@@ -2,7 +2,6 @@ from pathlib import Path
 
 import pyproj
 import triangle as tr
-from geojson import GeoJSON
 from geopandas import GeoSeries
 from networkx import MultiDiGraph, Graph, MultiGraph
 from pandas import Index
@@ -1038,7 +1037,7 @@ def _identify_intersected_track_edges(triangle: list, net: snkit.network.Network
     return affected_track_edges
 
 
-def cut_track_edges_at_triangle_sides(track_edges: GeoDataFrame, triangulation_data: dict):
+def cut_track_edges_at_triangle_sides(track_edges: GeoDataFrame, triangulation_data: dict) -> GeoDataFrame:
     cut_track_edges = []
     for tri in triangulation_data['triangles']:
         cut_result = gpd.overlay(track_edges, gpd.GeoDataFrame(geometry=[tri]), how='intersection')
