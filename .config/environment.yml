@@ -300,7 +300,7 @@ dependencies:
   - zlib=1.2.13=hcfcfb64_5
   - zstd=1.5.2=h12be248_7
   - pip:
-      - git+https://github.com/Deltares/ra2ce.git
+      - ra2ce
       - affine
       - damagescanner
       - geojson
