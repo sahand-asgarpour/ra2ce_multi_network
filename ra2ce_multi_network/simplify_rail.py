@@ -773,7 +773,7 @@ def _get_edge_paths(node_set: set, net: snkit.network.Network) -> list:
                     node_set.remove(match)
                 else:
                     node_path.add(match)
-        if len(node_path) > 2:
+        if len(node_path) >= 2:
             edge_paths.append(
                 net.edges.loc[
                     (net.edges.from_id.isin(node_path))
