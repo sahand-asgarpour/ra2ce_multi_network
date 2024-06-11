@@ -614,64 +614,48 @@ def _get_merge_edge_paths(
     aggfunc: Union[str, dict],
     net: snkit.network.Network,
 ) -> GeoDataFrame:
-    def _get_sub_path_parts(ids: Index) -> list:
-        sub_path_parts = []
-        edge_group = edges.loc[
-            ids.tolist()
-        ]  # loc finds the elements based on the index numbers
-        edge_group["intersections"] = edge_group.apply(
-            lambda x: _get_intersections(x, edges), axis=1
-        )
-        for edge in edge_group.itertuples(index=False):
-            sub_path_part = [edge.id]  # list of edge.id  #
-            for other_edge in edge_group.itertuples(index=False):
-                if edge.id != other_edge.id:
-                    if len(set(edge.intersections) & set(other_edge.intersections)) > 0:
-                        sub_path_part.append(other_edge.id)
-            sub_path_parts.append(sorted(sub_path_part))
-        return sub_path_parts
+    def get_connected_lines(ids: Index):
+        """
+        Find groups of connected lines in a GeoDataFrame.
 
-    def _get_unified_unified_sub_paths(_sub_path_parts: list) -> list:
-        _unified_sub_paths = (
-            []
-        )  # list of a group's edge.id that should be merged considering the to-exclude columns
-        for i, sub_path_part in enumerate(_sub_path_parts):
-            for j, other_sub_path_part in enumerate(_sub_path_parts):
-                if (
-                    i <= j and len(set(sub_path_part) & set(other_sub_path_part)) > 0
-                ):  # find the connected edges
-                    union = sorted(set(sub_path_part + other_sub_path_part))
-                    _unified_sub_paths = _merge_element_in_a_list(
-                        set(union), _unified_sub_paths
-                    )
-                elif i <= j and len(set(sub_path_part) & set(other_sub_path_part)) == 0:
-                    if set(sub_path_part) not in _unified_sub_paths:
-                        _unified_sub_paths = _merge_element_in_a_list(
-                            set(sub_path_part), _unified_sub_paths
-                        )
-        return _unified_sub_paths
+        Parameters:
+        gdf (GeoDataFrame): A GeoDataFrame containing LINESTRING geometries.
 
-    def _merge_element_in_a_list(element_of_concern: set, a_list: list[set]) -> list:
-        considered = []
-        for element in a_list:
-            if element_of_concern != element and len(element_of_concern & element) > 0:
-                union = set(sorted(list(element_of_concern) + list(element)))
-                if union not in a_list:
-                    a_list.append(set(sorted(list(element_of_concern) + list(element))))
-                if element != union:
-                    del a_list[a_list.index(element)]
-                considered.append(element_of_concern)
-        if element_of_concern not in considered and element_of_concern not in a_list:
-            a_list.append(element_of_concern)
-        return a_list
+        Returns:
+        list of lists: Each sublist contains indices of lines in gdf that are connected.
+        """
+
+        # Initialize an empty graph
+        G = nx.Graph()
+        gdf = edges.loc[ids.tolist()]
+        # Add edges to the graph for each line in the GeoDataFrame
+        for idx, row in gdf.iterrows():
+            # Get the start and end points of the line
+            line = row["geometry"]
+            start_point = line.coords[0]
+            end_point = line.coords[-1]
+
+            # Add the line as an edge between its start and end points with the id as attribute
+            G.add_edge(start_point, end_point, index=idx, id=row["id"])
+
+        # Find connected components in the graph
+        connected_components = list(nx.connected_components(G))
+
+        # Map each component to the corresponding line ids
+        connected_line_groups = []
+        for component in connected_components:
+            line_ids = []
+            for u, v, data in G.edges(component, data=True):
+                line_ids.append(data["id"])
+            connected_line_groups.append(line_ids)
+
+        return connected_line_groups
 
     def _get_paths_to_merge(groups: dict) -> list:
         _paths_to_merge = []  # list of gpds to merge
         for _, edge_group_ids in groups.items():
-            sub_path_parts = _get_sub_path_parts(edge_group_ids)
-            unified_sub_paths = _get_unified_unified_sub_paths(sub_path_parts)
-            _paths_to_merge.extend(unified_sub_paths)
-            _paths_to_merge = sorted([list(sorted(i)) for i in _paths_to_merge])
+            sub_path_parts = get_connected_lines(edge_group_ids)
+            _paths_to_merge.extend(sub_path_parts)
         return _paths_to_merge
 
     def _merge(
@@ -752,14 +736,14 @@ def _get_merge_edge_paths(
                     LineString([coords[i], coords[i + 1]])
                     for i in range(len(coords) - 1)
                 ]
-                splits_gdf = _update_slite_edges_gdf(
+                splits_gdf = _update_split_edges_gdf(
                     splits, dem_nod_id, splits_gdf, _line_geom
                 )
                 return splits, splits_gdf
             else:
                 return None, splits_gdf
 
-        def _update_slite_edges_gdf(
+        def _update_split_edges_gdf(
             parts: list,
             dem_nod_id: int,
             splt_edgs: GeoDataFrame,
@@ -857,7 +841,8 @@ def _get_merge_edge_paths(
 
         # _merge function starts from here:
         gdf["intersections"] = gdf.apply(lambda x: _get_intersections(x, gdf), axis=1)
-        _merged = gdf.dissolve(by=by, aggfunc=_aggfunc, sort=False)
+        # _merged = gdf.dissolve(by=by, aggfunc=_aggfunc, sort=False)
+        _merged = merge_connected_lines(gdf, by, _aggfunc)
         merged_id = _merged["id"]  # the edge id of the merged edge
         if len(gdf) == 1:
             # 1. no merging is occurring
@@ -966,12 +951,16 @@ def _get_merge_edge_paths(
                     _merged = _get_merged_one_or_none_demand_edges(
                         _merged, path_extremities_node_ids
                     )
-                # else:
-                #     raise Warning(f"""Check the lines with the following ids {gdf.id.tolist()} """)
+                else:
+                    raise Warning(
+                        f"""Check the lines with the following ids {gdf.id.tolist()} """
+                    )
 
             merged_id = (
                 "to_be_updated"  # the edge id of the merged edge will be updated later
             )
+        _merged.node_A = _merged.from_id
+        _merged.node_B = _merged.to_id
         _merged.id = merged_id
         _merged.crs = gdf.crs
         return _merged
@@ -989,9 +978,9 @@ def _get_merge_edge_paths(
         edge_groups = edges.groupby(excluded_edge_types).groups
         paths_to_merge = _get_paths_to_merge(edge_groups)
 
-        for path_indices in paths_to_merge:
+        for path_ids in paths_to_merge:
             path_to_merge = edges[
-                edges["id"].isin(path_indices)
+                edges["id"].isin(path_ids)
             ].copy()  # indices of the edges in edges gdf
             merged = _merge(
                 gdf=path_to_merge, by=excluded_edge_types, _aggfunc=aggfunc, ntw=net
@@ -1001,6 +990,38 @@ def _get_merge_edge_paths(
         merged_edges.crs = edges.crs
 
     return merged_edges
+
+
+def merge_connected_lines(
+    gdf: gpd.GeoDataFrame, by: str, aggfunc: dict
+) -> gpd.GeoDataFrame:
+    """
+    Merge connected lines in a GeoDataFrame into a single LineString.
+
+    Parameters:
+    gdf (gpd.GeoDataFrame): GeoDataFrame containing the lines to merge.
+    by (str): Column name to group by.
+    aggfunc (dict): Dictionary of aggregation functions for other columns.
+
+    Returns:
+    gpd.GeoDataFrame: GeoDataFrame with merged lines.
+    """
+
+    # Merge all geometries into a single MultiLineString
+    merged_geometry = linemerge(gdf.geometry.tolist())
+    indices = gdf[by].iloc[0]
+    # Create a new GeoDataFrame with the merged geometry
+    merged_gdf = gpd.GeoDataFrame(
+        [{**indices, "geometry": merged_geometry}], crs=gdf.crs
+    )
+    merged_gdf.set_index(by, inplace=True)
+
+    # Combine the attributes using the aggregation function
+    for col, func in aggfunc.items():
+        if col != "geometry":
+            merged_gdf[col] = func(gdf[col])
+
+    return merged_gdf
 
 
 def _get_intersections(_edge, _edges):
