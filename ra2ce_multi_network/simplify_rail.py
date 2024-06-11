@@ -500,17 +500,17 @@ def _check_terminal_criteria(
 
 
 def simplify_rail(network: snkit.network.Network) -> snkit.network.Network:
-    network = _merge_edges(excluded_edge_types=["bridge", "tunnel"], network=network)
+    network = merge_edges(excluded_edge_types=["bridge", "tunnel"], network=network)
     network = _simplify_tracks(network, 0.012, 0.01)
     return network
 
 
-def _merge_edges(
+def merge_edges(
     excluded_edge_types: List[str],
     network: snkit.network.Network = None,
     graph: Graph = None,
 ) -> snkit.network.Network:
-    # _merge_edges starts here. add the degree column to nodes and put it high for the excluded_edge_types objects
+    # merge_edges starts here. add the degree column to nodes and put it high for the excluded_edge_types objects
     if (not network) and (not graph):
         raise ValueError("a network or graph should be introduced")
     if graph and (not network):
@@ -518,7 +518,7 @@ def _merge_edges(
 
     network = _check_edge_ids(network)
     network = _get_nodes_degree(network)
-    # merge_edges
+    # _merge_edges
     cols = [col for col in network.edges.columns if col != "geometry"]
 
     if "demand_edge" not in excluded_edge_types:
@@ -556,7 +556,7 @@ def _merge_edges(
             for col in cols
         }
 
-    network = merge_edges(network, aggfunc=aggfunc, by=excluded_edge_types)
+    network = _merge_edges(network, aggfunc=aggfunc, by=excluded_edge_types)
     network.edges["length"] = network.edges["geometry"].length * 111.32  # length in km
     network.edges = network.edges[
         network.edges["length"] != 0
@@ -1053,7 +1053,7 @@ def _get_intersections(_edge, _edges):
     return sorted(intersections, key=lambda x: x[0])
 
 
-def merge_edges(
+def _merge_edges(
     net: snkit.network.Network,
     aggfunc: Union[str, dict],
     by: Union[str, list],
