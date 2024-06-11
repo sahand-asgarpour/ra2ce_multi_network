@@ -10,6 +10,7 @@ from typing import Union, List, Optional
 from pyproj import CRS
 import geopandas as gpd
 import pandas as pd
+from collections import defaultdict
 import snkit.network
 
 from snkit.network import *
@@ -1093,6 +1094,15 @@ def merge_edges(
 
 
 def _get_edge_paths(node_set: set, net: snkit.network.Network) -> list:
+    # Convert edges to an adjacency list using vectorized operations
+    edge_dict = defaultdict(set)
+    from_ids = net.edges["from_id"].values
+    to_ids = net.edges["to_id"].values
+
+    for from_id, to_id in zip(from_ids, to_ids):
+        edge_dict[from_id].add(to_id)
+        edge_dict[to_id].add(from_id)
+
     edge_paths = []
 
     while node_set:
@@ -1101,17 +1111,7 @@ def _get_edge_paths(node_set: set, net: snkit.network.Network) -> list:
         candidates = {popped_node}
         while candidates:
             popped_cand = candidates.pop()
-            matches = set(
-                np.unique(
-                    net.edges[["from_id", "to_id"]]
-                    .loc[
-                        (net.edges.from_id == popped_cand)
-                        | (net.edges.to_id == popped_cand)
-                    ]
-                    .values
-                )
-            )
-            matches.remove(popped_cand)
+            matches = edge_dict[popped_cand]
             matches = matches - node_path
             for match in matches:
                 if match in node_set:
@@ -1128,6 +1128,45 @@ def _get_edge_paths(node_set: set, net: snkit.network.Network) -> list:
                 ]
             )
     return edge_paths
+
+
+# def _get_edge_paths(node_set: set, net: snkit.network.Network) -> list:
+#     edge_paths = []
+
+#     # Convert edges to a dictionary of sets for faster access
+# edge_from_id_dict = {}
+# edge_to_id_dict = {}
+# for index, row in net.edges.iterrows():
+#     if row.from_id not in edge_from_id_dict:
+#         edge_from_id_dict[row.from_id] = set()
+#     if row.to_id not in edge_to_id_dict:
+#         edge_to_id_dict[row.to_id] = set()
+#     edge_to_id_dict[row.to_id].add(row.from_id)
+#     edge_from_id_dict[row.from_id].add(row.to_id)
+
+#     while node_set:
+#         popped_node = node_set.pop()
+#         node_path = {popped_node}
+#         candidates = {popped_node}
+#         while candidates:
+#             popped_cand = candidates.pop()
+#             matches = edge_to_id_dict.get(popped_cand, set()) + edge_to_id_dict.get(
+#                 popped_cand, set()
+#             )
+#             matches -= node_path
+#             new_matches = matches & node_set
+#             candidates.update(new_matches)
+#             node_path.update(new_matches)
+#             node_set -= new_matches
+
+#         if len(node_path) >= 2:
+#             edge_paths.append(
+#                 net.edges.loc[
+#                     (net.edges.from_id.isin(node_path))
+#                     & (net.edges.to_id.isin(node_path))
+#                 ]
+#             )
+#     return edge_paths
 
 
 def _simplify_tracks(
