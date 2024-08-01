@@ -14,8 +14,7 @@ from collections import defaultdict
 import snkit.network
 
 from snkit.network import *
-
-from ra2ce.graph.origins_destinations import add_od_nodes
+from ra2ce.network.origins_destinations import add_od_nodes
 from ra2ce_multi_network.trails import *
 
 
