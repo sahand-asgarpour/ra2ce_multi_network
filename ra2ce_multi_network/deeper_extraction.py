@@ -1,21 +1,30 @@
+import ast
 import geopandas as gpd
 
 
-def filter_on_other_tags(attributes: dict, other_tags_keys: list, gdf: gpd.GeoDataFrame, dropna=None):
+def filter_on_other_tags(
+    attributes: dict, other_tags_keys: list, gdf: gpd.GeoDataFrame, dropna=None
+):
     if dropna is None:
         dropna = []
     if not isinstance(dropna, list):
-        raise ValueError("""drop na should be the list of column names for which each row should be dropped 
-        when the column's value is null""")
+        raise ValueError(
+            """drop na should be the list of column names for which each row should be dropped 
+        when the column's value is null"""
+        )
     if gdf.empty:
         return gdf
-    if 'other_tags' in attributes:
+    if "other_tags" in attributes:
         for flt in other_tags_keys:
-            flt_attribute_name = flt.split('=>')[0]
+            flt_attribute_name = flt.split("=>")[0]
             gdf[flt_attribute_name] = None
-            gdf[flt_attribute_name] = gdf[['other_tags', flt_attribute_name]].apply(
-                lambda x: _filter(_flt=flt, _attr=x['other_tags']), axis=1)
-            gdf.rename(columns={flt_attribute_name: flt_attribute_name.strip('"')}, inplace=True)
+            gdf[flt_attribute_name] = gdf[["other_tags", flt_attribute_name]].apply(
+                lambda x: _filter(_flt=flt, _attr=x["other_tags"]), axis=1
+            )
+            gdf.rename(
+                columns={flt_attribute_name: flt_attribute_name.strip('"')},
+                inplace=True,
+            )
         if bool(dropna):
             for column_name in dropna:
                 gdf.dropna(subset=[column_name], inplace=True)
@@ -27,7 +36,25 @@ def filter_on_other_tags(attributes: dict, other_tags_keys: list, gdf: gpd.GeoDa
 def _filter(_flt: str, _attr: str):
     if _attr is not None:
         if _flt in _attr:
-            if _flt.split('=>')[1] == "":
-                return next((tag_kay.split('=>')[1] for tag_kay in _attr.split(",") if _flt in tag_kay), None)
+            if _flt.split("=>")[1] == "":
+                _val = next(
+                    (
+                        tag_kay.split("=>")[1]
+                        for tag_kay in _attr.split(",")
+                        if _flt in tag_kay
+                    ),
+                    None,
+                )
+                try:
+                    # Attempt to evaluate the value
+                    converted_value = ast.literal_eval(_val)
+                    # Check if the result is an int or float
+                    if isinstance(converted_value, (int, float)):
+                        return converted_value
+                    # If the result is not a number, return the original value
+                    return _val
+                except (ValueError, SyntaxError):
+                    # If evaluation fails, return the original value
+                    return _val
             else:
-                return _flt.split('=>')[1]
+                return _flt.split("=>")[1]
