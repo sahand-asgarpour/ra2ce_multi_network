@@ -45,10 +45,13 @@ def _filter(_flt: str, _attr: str):
                     ),
                     None,
                 )
+                if isinstance(_val, str):
+                    _val = _val.strip("'\"")
                 try:
                     # Attempt to evaluate the value
                     converted_value = ast.literal_eval(_val)
-                    # Check if the result is an int or float
+                    if isinstance(converted_value, (int, float)):
+                        converted_value = ast.literal_eval(converted_value)
                     if isinstance(converted_value, (int, float)):
                         return converted_value
                     # If the result is not a number, return the original value
