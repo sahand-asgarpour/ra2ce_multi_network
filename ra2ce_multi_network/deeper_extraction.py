@@ -51,8 +51,6 @@ def _filter(_flt: str, _attr: str):
                     # Attempt to evaluate the value
                     converted_value = ast.literal_eval(_val)
                     if isinstance(converted_value, (int, float)):
-                        converted_value = ast.literal_eval(converted_value)
-                    if isinstance(converted_value, (int, float)):
                         return converted_value
                     # If the result is not a number, return the original value
                     return _val
