@@ -19,7 +19,7 @@ git clone https://github.com/sahand-asgarpour/ra2ce_multi_network.git
 2. Create the ra2ce_multi_env:
 
 ```
-cd <to the main repository RA2CE folder>
+cd <to the main repository ra2ce_multi folder>
 conda env create -f .config\environment.yml
 conda activate ra2ce_multi_env
 ```
